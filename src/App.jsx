@@ -6,7 +6,7 @@ import {
   ZoomIn, ZoomOut, RotateCcw, CheckSquare, Undo2, SlidersHorizontal,
   Bold, Italic, Underline, FilePlus, FileCode, Award, PenTool,
   Layers, Eye, EyeOff, ArrowUp, ArrowDown, Check, X, Search, Maximize2, Minimize2, Grid,
-  Maximize
+  Maximize, Info
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -1391,7 +1391,23 @@ export default function CertificateGenerator() {
                         <input type="file" accept=".csv" onChange={handleCSVImport} className="hidden" />
                       </label>
                     </div>
-
+                    <div className="p-2.5 bg-purple-50/60 border border-purple-200/80 rounded-xl space-y-1 text-xs">
+                            <div className="flex items-center gap-1.5 font-semibold text-purple-900">
+                              <Info className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                              <span>CSV Format Requirement</span>
+                            </div>
+                            <p className="text-[11px] text-gray-600 leading-tight">
+                              First row header required: <b>Name, Position</b>
+                            </p>
+                            <div className="bg-white/80 border border-purple-100 p-1.5 rounded-lg text-[10px] font-mono text-purple-800 leading-tight">
+                              Name,Position<br />
+                              Juan Dela Cruz,Speaker<br />
+                              Maria Clara,Participant
+                            </div>
+                            <p className="text-[11px] text-gray-600 leading-tight">
+                            <b>Optional:</b> Add "" double quotes for positions with commas. <b>e.g ("Dean, College of Science")</b>
+                            </p>
+                    </div>
                     <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
                       {awardees.map((item, idx) => (
                         <div 
