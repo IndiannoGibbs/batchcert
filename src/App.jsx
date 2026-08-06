@@ -1737,7 +1737,7 @@ export default function CertificateGenerator() {
               className="w-full inline-flex items-center justify-center gap-1.5 bg-[#29abe0] hover:bg-[#208ab8] text-white font-medium py-2 px-3 rounded-lg text-xs transition-colors shadow-sm"
             >
               <span>☕</span>
-              <span>Support on Ko-fi</span>
+              <span>Support me on Ko-fi to make this FREE FOREVER!</span>
             </a>
           </div>
 
