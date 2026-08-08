@@ -6,11 +6,43 @@ import {
   ZoomIn, ZoomOut, RotateCcw, CheckSquare, Undo2, SlidersHorizontal,
   Bold, Italic, Underline, FilePlus, FileCode, Award, PenTool,
   Layers, Eye, EyeOff, ArrowUp, ArrowDown, Check, X, Search, Maximize2, Minimize2, Grid,
-  Maximize, Info
+  Maximize, Info, Tag, FileType, QrCode, HelpCircle
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import JSZip from 'jszip';
+
+// --- Curated Google Fonts Library ---
+const GOOGLE_FONTS = [
+  // Serif / Academic
+  { id: 'Cinzel', name: 'Cinzel', family: "'Cinzel', serif", category: 'Serif / Academic' },
+  { id: 'Playfair Display', name: 'Playfair Display', family: "'Playfair Display', serif", category: 'Serif / Academic' },
+  { id: 'Cormorant Garamond', name: 'Cormorant Garamond', family: "'Cormorant Garamond', serif", category: 'Serif / Academic' },
+  { id: 'Merriweather', name: 'Merriweather', family: "'Merriweather', serif", category: 'Serif / Academic' },
+  { id: 'Bodoni Moda', name: 'Bodoni Moda', family: "'Bodoni Moda', serif", category: 'Serif / Academic' },
+  
+  // Sans-Serif / Modern
+  { id: 'Inter', name: 'Inter', family: "'Inter', sans-serif", category: 'Sans-Serif / Modern' },
+  { id: 'Montserrat', name: 'Montserrat', family: "'Montserrat', sans-serif", category: 'Sans-Serif / Modern' },
+  { id: 'Poppins', name: 'Poppins', family: "'Poppins', sans-serif", category: 'Sans-Serif / Modern' },
+  { id: 'Roboto', name: 'Roboto', family: "'Roboto', sans-serif", category: 'Sans-Serif / Modern' },
+  { id: 'Oswald', name: 'Oswald', family: "'Oswald', sans-serif", category: 'Sans-Serif / Modern' },
+
+  // Calligraphy / Script
+  { id: 'Great Vibes', name: 'Great Vibes', family: "'Great Vibes', cursive", category: 'Calligraphy / Script' },
+  { id: 'Alex Brush', name: 'Alex Brush', family: "'Alex Brush', cursive", category: 'Calligraphy / Script' },
+  { id: 'Dancing Script', name: 'Dancing Script', family: "'Dancing Script', cursive", category: 'Calligraphy / Script' },
+  { id: 'Pinyon Script', name: 'Pinyon Script', family: "'Pinyon Script', cursive", category: 'Calligraphy / Script' },
+  { id: 'Allura', name: 'Allura', family: "'Allura', cursive", category: 'Calligraphy / Script' }
+];
+
+// --- Canvas Dimension Presets ---
+const CANVAS_PRESETS = [
+  { id: 'letter-landscape', name: 'US Letter Landscape', width: 1100, height: 850 },
+  { id: 'letter-portrait', name: 'US Letter Portrait', width: 850, height: 1100 },
+  { id: 'a4-landscape', name: 'A4 Landscape', width: 1123, height: 794 },
+  { id: 'a4-portrait', name: 'A4 Portrait', width: 794, height: 1123 },
+];
 
 // --- Preset Background Styles ---
 const PRESET_BACKGROUNDS = {
@@ -60,6 +92,7 @@ export default function CertificateGenerator() {
   const [customBg, setCustomBg] = useState(null);
   
   const [projectName, setProjectName] = useState('BatchCert_Project');
+  const [canvasSize, setCanvasSize] = useState({ width: 1100, height: 850, label: 'US Letter Landscape' });
 
   // Advanced Custom Background Controls
   const [bgTransform, setBgTransform] = useState({
@@ -90,6 +123,7 @@ export default function CertificateGenerator() {
       id: '1', 
       name: '', 
       position: '',
+      csvData: { Name: '', Position: '' },
       hasCustomLayout: false,
       customElements: null,
       customSignatories: null
@@ -97,7 +131,18 @@ export default function CertificateGenerator() {
   ]);
   const [currentAwardeeIdx, setCurrentAwardeeIdx] = useState(0);
 
-  // Preview, Guides & Quick Search States
+  // Sidebar Awardee Search & Pagination States
+  const [sidebarSearchQuery, setSidebarSearchQuery] = useState('');
+  const [sidebarPage, setSidebarPage] = useState(0);
+  const itemsPerPage = 8;
+
+  // Dynamic CSV Headers List
+  const [csvHeaders, setCsvHeaders] = useState(['Name', 'Position']);
+
+  // Modals & UI States
+  const [isCsvModalOpen, setIsCsvModalOpen] = useState(false);
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+  const [isKeyboardModalOpen, setIsKeyboardModalOpen] = useState(false);
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [showGuides, setShowGuides] = useState(false);
   const [isAwardeeDropdownOpen, setIsAwardeeDropdownOpen] = useState(false);
@@ -106,6 +151,8 @@ export default function CertificateGenerator() {
   // Export Modal State
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportMode, setExportMode] = useState('all'); 
+  const [exportFormat, setExportFormat] = useState('pdf'); // 'pdf' | 'png'
+  const [exportScale, setExportScale] = useState(2); // 1x draft, 2x HD, 3x Ultra HD
   const [selectedExportIndices, setSelectedExportIndices] = useState([]);
 
   const initialElements = [];
@@ -116,7 +163,7 @@ export default function CertificateGenerator() {
 
   const [editingElementId, setEditingElementId] = useState(null);
 
-  // Guide lines state (percentage relative to canvas 1100x850)
+  // Guide lines state (percentage relative to canvas dimensions)
   const [guides, setGuides] = useState({
     horizontal: [50],
     vertical: [50]
@@ -129,6 +176,31 @@ export default function CertificateGenerator() {
   const currentAwardee = awardees[currentAwardeeIdx] || {};
   const activeElements = deduplicateElements((currentAwardee.hasCustomLayout && currentAwardee.customElements) ? currentAwardee.customElements : elements);
   const activeSignatories = (currentAwardee.hasCustomLayout && currentAwardee.customSignatories) ? currentAwardee.customSignatories : signatories;
+
+  // Load Google Fonts into document head dynamically on mount
+  useEffect(() => {
+    const linkId = 'batchcert-google-fonts';
+    if (!document.getElementById(linkId)) {
+      const link = document.createElement('link');
+      link.id = linkId;
+      link.rel = 'stylesheet';
+      link.href = 'https://fonts.googleapis.com/css2?family=Alex+Brush&family=Allura&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..900;1,6..96,400..900&family=Cinzel:wght@400..900&family=Cormorant+Garamond:ital,wght@0,300..700;1,300..700&family=Dancing+Script:wght@400..700&family=Great+Vibes&family=Inter:wght@100..900&family=Merriweather:ital,wght@0,300..900;1,300..900&family=Montserrat:ital,wght@0,100..900;1,100..900&family=Oswald:wght@200..700&family=Pinyon+Script&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Poppins:ital,wght@0,100..900;1,100..900&family=Roboto:ital,wght@0,100..900;1,100..900&display=swap';
+      document.head.appendChild(link);
+    }
+  }, []);
+
+  const getFontFamily = (fontKey) => {
+    const found = GOOGLE_FONTS.find(f => f.id === fontKey || f.id.toLowerCase() === fontKey?.toLowerCase());
+    if (found) return found.family;
+
+    switch (fontKey) {
+      case 'serif': return "'Georgia', 'Times New Roman', serif";
+      case 'sans': return "'Inter', 'Helvetica', 'Arial', sans-serif";
+      case 'cursive': return "'Great Vibes', 'Brush Script MT', cursive";
+      case 'mono': return "'Courier New', monospace";
+      default: return fontKey || 'sans-serif';
+    }
+  };
 
   const updateElementByKeyOrSig = (criteria, textVal, defaultProps) => {
     let updatedEls = [...activeElements].filter(el => {
@@ -164,22 +236,28 @@ export default function CertificateGenerator() {
   const handleGlobalDataChange = (key, val) => {
     setGlobalData(prev => ({ ...prev, [key]: val }));
     const defaults = {
-      orgName: { x: 50, y: 11, fontSize: 24, font: 'serif', color: '#581c87', bold: true, maxWidth: 85, align: 'center' },
-      orgSubtext: { x: 50, y: 16, fontSize: 24, font: 'sans', color: '#6b7280', bold: false, maxWidth: 80, align: 'center' },
-      certificateTitle: { x: 50, y: 25, fontSize: 24, font: 'serif', color: '#581c87', bold: true, maxWidth: 85, align: 'center' },
-      bodyTemplate: { x: 50, y: 55, fontSize: 24, font: 'serif', color: '#374151', bold: false, maxWidth: 78, align: 'center' },
-      dateLine: { x: 50, y: 74, fontSize: 24, font: 'serif', color: '#6b7280', bold: false, maxWidth: 80, align: 'center' },
-    }[key] || { x: 50, y: 50, fontSize: 24, font: 'sans', color: '#1f2937', bold: false, maxWidth: 80, align: 'center' };
+      orgName: { x: 50, y: 11, fontSize: 24, font: 'Cinzel', color: '#581c87', bold: true, maxWidth: 85, align: 'center' },
+      orgSubtext: { x: 50, y: 16, fontSize: 18, font: 'Inter', color: '#6b7280', bold: false, maxWidth: 80, align: 'center' },
+      certificateTitle: { x: 50, y: 25, fontSize: 32, font: 'Playfair Display', color: '#581c87', bold: true, maxWidth: 85, align: 'center' },
+      bodyTemplate: { x: 50, y: 55, fontSize: 18, font: 'Cormorant Garamond', color: '#374151', bold: false, maxWidth: 78, align: 'center' },
+      dateLine: { x: 50, y: 74, fontSize: 16, font: 'Inter', color: '#6b7280', bold: false, maxWidth: 80, align: 'center' },
+    }[key] || { x: 50, y: 50, fontSize: 20, font: 'Inter', color: '#1f2937', bold: false, maxWidth: 80, align: 'center' };
 
     updateElementByKeyOrSig({ key }, val, defaults);
   };
 
   const handleAwardeeChange = (field, val) => {
-    setAwardees(prev => prev.map((a, i) => i === currentAwardeeIdx ? { ...a, [field]: val } : a));
+    setAwardees(prev => prev.map((a, i) => {
+      if (i === currentAwardeeIdx) {
+        const updatedCsvData = { ...(a.csvData || {}), [field === 'name' ? 'Name' : 'Position']: val };
+        return { ...a, [field]: val, csvData: updatedCsvData };
+      }
+      return a;
+    }));
     const key = field === 'name' ? 'awardeeName' : 'awardeePosition';
     const defaults = field === 'name' 
-      ? { x: 50, y: 36, fontSize: 24, font: 'serif', color: '#581c87', bold: true, maxWidth: 90, align: 'center' }
-      : { x: 50, y: 44, fontSize: 24, font: 'sans', color: '#1f2937', bold: true, maxWidth: 85, align: 'center' };
+      ? { x: 50, y: 36, fontSize: 36, font: 'Great Vibes', color: '#581c87', bold: true, maxWidth: 90, align: 'center' }
+      : { x: 50, y: 44, fontSize: 18, font: 'Montserrat', color: '#1f2937', bold: true, maxWidth: 85, align: 'center' };
 
     updateElementByKeyOrSig({ key }, val, defaults);
   };
@@ -195,8 +273,8 @@ export default function CertificateGenerator() {
     const sigIdx = activeSignatories.findIndex(s => s.id === sigId);
     const posX = activeSignatories.length === 1 ? 50 : (sigIdx === 0 ? 30 : 70);
     const defaults = sigField === 'name'
-      ? { x: posX, y: 87, fontSize: 24, font: 'sans', color: '#1f2937', bold: true, maxWidth: 40, align: 'center' }
-      : { x: posX, y: 91, fontSize: 24, font: 'sans', color: '#4b5563', bold: false, maxWidth: 40, align: 'center' };
+      ? { x: posX, y: 87, fontSize: 18, font: 'Inter', color: '#1f2937', bold: true, maxWidth: 40, align: 'center' }
+      : { x: posX, y: 91, fontSize: 14, font: 'Inter', color: '#4b5563', bold: false, maxWidth: 40, align: 'center' };
 
     updateElementByKeyOrSig({ sigId, sigField }, val, defaults);
   };
@@ -230,7 +308,9 @@ export default function CertificateGenerator() {
         if (state.globalData) setGlobalData(state.globalData);
         if (state.signatories) setSignatories(state.signatories);
         if (state.awardees) setAwardees(state.awardees);
+        if (state.csvHeaders) setCsvHeaders(state.csvHeaders);
         if (state.projectName) setProjectName(state.projectName);
+        if (state.canvasSize) setCanvasSize(state.canvasSize);
         if (state.elements) {
           const cleaned = deduplicateElements(state.elements);
           setElements(cleaned);
@@ -245,12 +325,12 @@ export default function CertificateGenerator() {
 
   useEffect(() => {
     try {
-      const projectState = { bgType, customBg, bgTransform, logoImg, globalData, signatories, awardees, elements, projectName };
+      const projectState = { bgType, customBg, bgTransform, logoImg, globalData, signatories, awardees, csvHeaders, elements, projectName, canvasSize };
       localStorage.setItem('batchcert_project_auto', JSON.stringify(projectState));
     } catch (err) {
       console.warn('LocalStorage quota exceeded.', err);
     }
-  }, [bgType, customBg, bgTransform, logoImg, globalData, signatories, awardees, elements, projectName]);
+  }, [bgType, customBg, bgTransform, logoImg, globalData, signatories, awardees, csvHeaders, elements, projectName, canvasSize]);
 
   const pushHistory = (newElements) => {
     const cleaned = deduplicateElements(newElements);
@@ -300,8 +380,8 @@ export default function CertificateGenerator() {
     const updateScale = () => {
       if (!containerRef.current) return;
       const { clientWidth, clientHeight } = containerRef.current;
-      const targetWidth = 1100;
-      const targetHeight = 850;
+      const targetWidth = canvasSize.width;
+      const targetHeight = canvasSize.height;
       const padding = 100;
       const scaleX = (clientWidth - padding) / targetWidth;
       const scaleY = (clientHeight - padding) / targetHeight;
@@ -316,7 +396,7 @@ export default function CertificateGenerator() {
       window.removeEventListener('resize', updateScale);
       observer.disconnect();
     };
-  }, []);
+  }, [canvasSize]);
 
   const zoomIn = () => setZoomMultiplier(prev => Math.min(2.5, prev + 0.15));
   const zoomOut = () => setZoomMultiplier(prev => Math.max(0.4, prev - 0.15));
@@ -331,7 +411,9 @@ export default function CertificateGenerator() {
     if (el.type === 'text') {
       widthPct = el.maxWidth || 50;
     } else if (el.type === 'line' || el.type === 'logo') {
-      widthPct = ((el.width || 100) / 1100) * 100;
+      widthPct = ((el.width || 100) / canvasSize.width) * 100;
+    } else if (el.type === 'qrcode') {
+      widthPct = ((el.size || 100) / canvasSize.width) * 100;
     }
 
     const isCentered = el.align === 'center' || el.type === 'logo';
@@ -471,7 +553,8 @@ export default function CertificateGenerator() {
       setElements([]);
       setHistory([[]]);
       setHistoryIndex(0);
-      setAwardees([{ id: '1', name: '', position: '', hasCustomLayout: false, customElements: null, customSignatories: null }]);
+      setAwardees([{ id: '1', name: '', position: '', csvData: { Name: '', Position: '' }, hasCustomLayout: false, customElements: null, customSignatories: null }]);
+      setCsvHeaders(['Name', 'Position']);
       setCurrentAwardeeIdx(0);
       setProjectName('Blank_BatchCert_Project');
       setCustomBg(null);
@@ -481,7 +564,7 @@ export default function CertificateGenerator() {
   };
 
   const handleSaveProject = () => {
-    const projectState = { bgType, customBg, bgTransform, logoImg, globalData, signatories, awardees, elements, projectName };
+    const projectState = { bgType, customBg, bgTransform, logoImg, globalData, signatories, awardees, csvHeaders, elements, projectName, canvasSize };
     const blob = new Blob([JSON.stringify(projectState, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -507,7 +590,9 @@ export default function CertificateGenerator() {
         if (state.globalData) setGlobalData(state.globalData);
         if (state.signatories) setSignatories(state.signatories);
         if (state.awardees) setAwardees(state.awardees);
+        if (state.csvHeaders) setCsvHeaders(state.csvHeaders);
         if (state.projectName) setProjectName(state.projectName);
+        if (state.canvasSize) setCanvasSize(state.canvasSize);
         if (state.elements) {
           const cleaned = deduplicateElements(state.elements);
           setElements(cleaned);
@@ -529,7 +614,8 @@ export default function CertificateGenerator() {
       signatories,
       bgType,
       bgTransform,
-      logoImg
+      logoImg,
+      canvasSize
     };
     const blob = new Blob([JSON.stringify(layoutTemplate, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -559,6 +645,7 @@ export default function CertificateGenerator() {
         if (state.bgType) setBgType(state.bgType);
         if (state.bgTransform) setBgTransform(state.bgTransform);
         if (state.logoImg !== undefined) setLogoImg(state.logoImg);
+        if (state.canvasSize) setCanvasSize(state.canvasSize);
         alert('Layout template applied successfully!');
       } catch (err) {
         alert('Failed to load layout template file.');
@@ -574,6 +661,7 @@ export default function CertificateGenerator() {
     pushHistory(updated);
   };
 
+  // Group Deletion / Single Deletion support
   const deleteSelectedElements = () => {
     if (selectedIds.length === 0) return;
     const updated = activeElements.filter(el => !selectedIds.includes(el.id));
@@ -591,8 +679,8 @@ export default function CertificateGenerator() {
       label: 'Custom Text',
       x: 50,
       y: 50,
-      fontSize: 24,
-      font: 'sans',
+      fontSize: 20,
+      font: 'Inter',
       color: '#1f2937',
       align: 'center',
       bold: false,
@@ -621,6 +709,54 @@ export default function CertificateGenerator() {
     const updated = [...activeElements, newEl];
     pushHistory(updated);
     setSelectedIds([newEl.id]);
+  };
+
+  const addQRCodeElement = () => {
+    const newEl = {
+      id: `custom_qr_${Date.now()}`,
+      type: 'qrcode',
+      label: 'QR Code',
+      x: 85,
+      y: 78,
+      size: 90,
+      data: 'https://batchcert.verify/cert/{{Name}}',
+      visible: true
+    };
+    const updated = [...activeElements, newEl];
+    pushHistory(updated);
+    setSelectedIds([newEl.id]);
+  };
+
+  const insertTagIntoCanvas = (tagName) => {
+    const tagPlaceholder = `{{${tagName}}}`;
+    if (selectedIds.length === 1 && primarySelectedElement && primarySelectedElement.type === 'text') {
+      const currentText = primarySelectedElement.text || '';
+      updateSelectedElement('text', `${currentText} ${tagPlaceholder}`.trim());
+    } else if (selectedIds.length === 1 && primarySelectedElement && primarySelectedElement.type === 'qrcode') {
+      const currentData = primarySelectedElement.data || '';
+      updateSelectedElement('data', `${currentData}${tagPlaceholder}`.trim());
+    } else {
+      const newEl = {
+        id: `custom_tag_${Date.now()}`,
+        type: 'text',
+        text: tagPlaceholder,
+        label: `Field: ${tagName}`,
+        x: 50,
+        y: 50,
+        fontSize: 20,
+        font: 'Inter',
+        color: '#1f2937',
+        align: 'center',
+        bold: false,
+        italic: false,
+        underline: false,
+        maxWidth: 50,
+        visible: true
+      };
+      const updated = [...activeElements, newEl];
+      pushHistory(updated);
+      setSelectedIds([newEl.id]);
+    }
   };
 
   const applyTextFormat = (formatType) => {
@@ -695,7 +831,6 @@ export default function CertificateGenerator() {
         return;
       }
 
-      // Arrow Key Movement Handling
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         if (isInput || isEditingInline) return;
         if (selectedIds.length === 0) return;
@@ -729,50 +864,89 @@ export default function CertificateGenerator() {
   }, [selectedIds, historyIndex, history, currentAwardeeIdx, currentAwardee.hasCustomLayout, activeElements, projectName, editingElementId]);
 
   const getElementText = (el) => {
+    let rawText = '';
     if (el.sigId) {
       const sig = activeSignatories.find(s => s.id === el.sigId);
-      if (sig) return sig[el.sigField] || '';
-    }
-
-    if (el.text !== undefined && el.text !== null && !el.key) {
-      return el.text;
-    }
-
-    const currentAwardeeObj = awardees[currentAwardeeIdx] || { name: '', position: '' };
-    switch (el.key) {
-      case 'orgName': return globalData.orgName || '';
-      case 'orgSubtext': return globalData.orgSubtext || '';
-      case 'certificateTitle': return globalData.certificateTitle || '';
-      case 'bodyTemplate': {
-        const template = globalData.bodyTemplate || '';
-        const duties = globalData.eventDuties || '';
-        if (template.includes('{{duties}}')) {
-          return template.replace(/\{\{duties\}\}/g, duties);
+      if (sig) rawText = sig[el.sigField] || '';
+    } else if (el.type === 'qrcode') {
+      rawText = el.data || '';
+    } else if (el.text !== undefined && el.text !== null && !el.key) {
+      rawText = el.text;
+    } else {
+      const currentAwardeeObj = awardees[currentAwardeeIdx] || { name: '', position: '' };
+      switch (el.key) {
+        case 'orgName': rawText = globalData.orgName || ''; break;
+        case 'orgSubtext': rawText = globalData.orgSubtext || ''; break;
+        case 'certificateTitle': rawText = globalData.certificateTitle || ''; break;
+        case 'bodyTemplate': {
+          const template = globalData.bodyTemplate || '';
+          const duties = globalData.eventDuties || '';
+          rawText = template.includes('{{duties}}') ? template.replace(/\{\{duties\}\}/g, duties) : template;
+          break;
         }
-        return template;
+        case 'dateLine': rawText = globalData.dateLine || ''; break;
+        case 'awardeeName': rawText = currentAwardeeObj.name || ''; break;
+        case 'awardeePosition': rawText = currentAwardeeObj.position || ''; break;
+        default: rawText = el.text || ''; break;
       }
-      case 'dateLine': return globalData.dateLine || '';
-      case 'awardeeName': return currentAwardeeObj.name || '';
-      case 'awardeePosition': return currentAwardeeObj.position || '';
-      default: return el.text || '';
     }
+
+    // Dynamic Dynamic {{Variable}} Placeholder Replacement
+    const currentAwardeeObj = awardees[currentAwardeeIdx] || {};
+    if (typeof rawText === 'string' && rawText.includes('{{')) {
+      return rawText.replace(/\{\{\s*([^}]+)\s*\}\}/g, (match, keyName) => {
+        const trimmedKey = keyName.trim();
+        if (trimmedKey === 'duties') return globalData.eventDuties || '';
+        if (trimmedKey.toLowerCase() === 'name') return currentAwardeeObj.name || '';
+        if (trimmedKey.toLowerCase() === 'position') return currentAwardeeObj.position || '';
+
+        if (currentAwardeeObj.csvData && currentAwardeeObj.csvData[trimmedKey] !== undefined) {
+          return currentAwardeeObj.csvData[trimmedKey];
+        }
+
+        if (currentAwardeeObj.csvData) {
+          const matchedKey = Object.keys(currentAwardeeObj.csvData).find(k => k.toLowerCase() === trimmedKey.toLowerCase());
+          if (matchedKey && currentAwardeeObj.csvData[matchedKey] !== undefined) {
+            return currentAwardeeObj.csvData[matchedKey];
+          }
+        }
+
+        if (currentAwardeeObj[trimmedKey] !== undefined) {
+          return currentAwardeeObj[trimmedKey];
+        }
+
+        return match;
+      });
+    }
+
+    return rawText;
   };
 
   const saveInlineEdit = (el, val) => {
     setEditingElementId(null);
     if (el.key === 'awardeeName') {
-      setAwardees(prev => prev.map((a, idx) => idx === currentAwardeeIdx ? { ...a, name: val } : a));
+      setAwardees(prev => prev.map((a, idx) => {
+        if (idx === currentAwardeeIdx) {
+          return { ...a, name: val, csvData: { ...(a.csvData || {}), Name: val } };
+        }
+        return a;
+      }));
     } else if (el.key === 'awardeePosition') {
-      setAwardees(prev => prev.map((a, idx) => idx === currentAwardeeIdx ? { ...a, position: val } : a));
+      setAwardees(prev => prev.map((a, idx) => {
+        if (idx === currentAwardeeIdx) {
+          return { ...a, position: val, csvData: { ...(a.csvData || {}), Position: val } };
+        }
+        return a;
+      }));
     } else if (el.key) {
       setGlobalData(prev => ({ ...prev, [el.key]: val }));
       updateElementByKeyOrSig({ key: el.key }, val);
     } else if (el.sigId) {
       if (currentAwardee.hasCustomLayout) {
-        const updatedSigs = activeSignatories.map(s => s.id === el.sigId ? { ...s, [el.sigField]: val } : s);
+        const updatedSigs = activeSignatories.map(s => s.id === el.sigId ? { ...s, [sigField]: val } : s);
         setAwardees(prev => prev.map((a, idx) => idx === currentAwardeeIdx ? { ...a, customSignatories: updatedSigs } : a));
       } else {
-        setSignatories(prev => prev.map(s => s.id === el.sigId ? { ...s, [el.sigField]: val } : s));
+        setSignatories(prev => prev.map(s => s.id === el.sigId ? { ...s, [sigField]: val } : s));
       }
     } else {
       const updated = activeElements.map(item => item.id === el.id ? { ...item, text: val } : item);
@@ -858,7 +1032,7 @@ export default function CertificateGenerator() {
       if (el) {
         const dx = e.clientX - resizeStartRef.current.startX;
         if (el.type === 'text') {
-          const containerWidth = canvasRef.current ? canvasRef.current.clientWidth : 1100;
+          const containerWidth = canvasRef.current ? canvasRef.current.clientWidth : canvasSize.width;
           const deltaPercent = (dx / (containerWidth * canvasScale * zoomMultiplier)) * 100;
           const newMaxWidth = Math.max(15, Math.min(100, resizeStartRef.current.startWidth + deltaPercent));
           const updated = activeElements.map(item => item.id === el.id ? { ...item, maxWidth: newMaxWidth } : item);
@@ -870,6 +1044,14 @@ export default function CertificateGenerator() {
         } else if (el.type === 'line' || el.type === 'logo') {
           const newWidth = Math.max(30, resizeStartRef.current.startElementWidth + dx);
           const updated = activeElements.map(item => item.id === el.id ? { ...item, width: newWidth } : item);
+          if (currentAwardee.hasCustomLayout) {
+            setAwardees(prev => prev.map((a, idx) => idx === currentAwardeeIdx ? { ...a, customElements: updated } : a));
+          } else {
+            setElements(updated);
+          }
+        } else if (el.type === 'qrcode') {
+          const newSize = Math.max(50, Math.min(300, (resizeStartRef.current.startElementWidth || 90) + dx));
+          const updated = activeElements.map(item => item.id === el.id ? { ...item, size: newSize } : item);
           if (currentAwardee.hasCustomLayout) {
             setAwardees(prev => prev.map((a, idx) => idx === currentAwardeeIdx ? { ...a, customElements: updated } : a));
           } else {
@@ -888,19 +1070,22 @@ export default function CertificateGenerator() {
     let isNearCenterX = false;
     let isNearCenterY = false;
 
+    // Multi-element group dragging support
     const updated = activeElements.map(el => {
       if (selectedIds.includes(el.id) && dragStartRef.current.initialPositions[el.id]) {
         const init = dragStartRef.current.initialPositions[el.id];
         let newX = init.x + deltaX;
         let newY = init.y + deltaY;
 
-        if (Math.abs(newX - 50) < 1.0) {
-          newX = 50;
-          isNearCenterX = true;
-        }
-        if (Math.abs(newY - 50) < 1.0) {
-          newY = 50;
-          isNearCenterY = true;
+        if (selectedIds.length === 1) {
+          if (Math.abs(newX - 50) < 1.0) {
+            newX = 50;
+            isNearCenterX = true;
+          }
+          if (Math.abs(newY - 50) < 1.0) {
+            newY = 50;
+            isNearCenterY = true;
+          }
         }
 
         newX = Math.max(2, Math.min(98, newX));
@@ -1024,25 +1209,47 @@ export default function CertificateGenerator() {
     reader.onload = (evt) => {
       const text = evt.target.result;
       const lines = text.split(/\r\n|\n/).filter(l => l.trim() !== '');
-      
-      const parsed = lines.slice(1).map((line, idx) => {
+      if (lines.length < 2) {
+        alert('CSV file must contain a header row and at least one data row.');
+        return;
+      }
+
+      const parseRow = (line) => {
         const rawParts = line.match(/(".*?"|[^",]+)(?=\s*,|\s*$)/g) || line.split(',');
-        const parts = rawParts.map(s => s.trim().replace(/^["']+|["']+$/g, '').replace(/""/g, '"'));
+        return rawParts.map(s => s.trim().replace(/^["']+|["']+$/g, '').replace(/""/g, '"'));
+      };
+
+      const headers = parseRow(lines[0]);
+      setCsvHeaders(headers);
+
+      const parsed = lines.slice(1).map((line, idx) => {
+        const parts = parseRow(line);
+        const rowData = {};
+        headers.forEach((h, hIdx) => {
+          rowData[h] = parts[hIdx] || '';
+        });
+
+        const nameIdx = headers.findIndex(h => h.toLowerCase() === 'name');
+        const posIdx = headers.findIndex(h => h.toLowerCase() === 'position' || h.toLowerCase() === 'title');
+
+        const nameVal = nameIdx !== -1 ? parts[nameIdx] : (parts[0] || '');
+        const posVal = posIdx !== -1 ? parts[posIdx] : (parts[1] || '');
 
         return { 
           id: String(Date.now() + idx), 
-          name: parts[0] || '', 
-          position: parts[1] || '',
+          name: nameVal, 
+          position: posVal,
+          csvData: rowData,
           hasCustomLayout: false,
           customElements: null,
           customSignatories: null
         };
-      }).filter(item => item.name !== '');
+      }).filter(item => item.name !== '' || Object.values(item.csvData || {}).some(v => v !== ''));
 
       if (parsed.length > 0) {
         setAwardees(parsed);
         setCurrentAwardeeIdx(0);
-        alert(`Successfully imported ${parsed.length} awardees! Layout and text formats remain unchanged.`);
+        alert(`Successfully imported ${parsed.length} awardees with ${headers.length} dynamic column fields (${headers.join(', ')})!`);
       } else {
         alert('No valid rows found in CSV.');
       }
@@ -1062,48 +1269,64 @@ export default function CertificateGenerator() {
     setIsExporting(true);
     setSelectedIds([]);
 
+    if (document.fonts && document.fonts.ready) {
+      await document.fonts.ready;
+    }
+
     const zip = new JSZip();
     const indicesToExport = exportMode === 'all' 
       ? awardees.map((_, idx) => idx) 
       : selectedExportIndices;
 
     const total = indicesToExport.length;
+    const chunkSize = 10;
 
     for (let i = 0; i < total; i++) {
       const awardeeIdx = indicesToExport[i];
       setCurrentAwardeeIdx(awardeeIdx);
       setExportProgress(Math.round(((i + 1) / total) * 100));
 
-      await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 150)));
+      await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 80)));
 
       const canvasElement = canvasRef.current;
       const renderedCanvas = await html2canvas(canvasElement, {
-        scale: 2,
+        scale: Number(exportScale),
         useCORS: true,
         logging: false
       });
 
-      const imgData = renderedCanvas.toDataURL('image/jpeg', 0.9);
-      const pdf = new jsPDF({
-        orientation: 'landscape',
-        unit: 'in',
-        format: [11, 8.5]
-      });
-      pdf.addImage(imgData, 'JPEG', 0, 0, 11, 8.5);
-
       const awardeeObj = awardees[awardeeIdx];
       const safeName = (awardeeObj.name || `Awardee_${awardeeIdx + 1}`).replace(/[^a-zA-Z0-9]/g, '_');
-      const filename = `BatchCert_${awardeeIdx + 1}_${safeName}.pdf`;
 
-      const pdfBlob = pdf.output('blob');
-      zip.file(filename, pdfBlob);
+      if (exportFormat === 'pdf') {
+        const imgData = renderedCanvas.toDataURL('image/jpeg', 0.85);
+        const orientation = canvasSize.width > canvasSize.height ? 'landscape' : 'portrait';
+        const pdf = new jsPDF({
+          orientation,
+          unit: 'px',
+          format: [canvasSize.width, canvasSize.height]
+        });
+        pdf.addImage(imgData, 'JPEG', 0, 0, canvasSize.width, canvasSize.height);
+        const pdfBlob = pdf.output('blob');
+        zip.file(`BatchCert_${awardeeIdx + 1}_${safeName}.pdf`, pdfBlob);
+      } else {
+        const pngBlob = await new Promise((resolve) => renderedCanvas.toBlob(resolve, 'image/png'));
+        zip.file(`BatchCert_${awardeeIdx + 1}_${safeName}.png`, pngBlob);
+      }
+
+      renderedCanvas.width = 0;
+      renderedCanvas.height = 0;
+
+      if ((i + 1) % chunkSize === 0) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
     }
 
     const content = await zip.generateAsync({ type: 'blob' });
     const url = URL.createObjectURL(content);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${projectName || 'BatchCert_Archive'}.zip`;
+    link.download = `${projectName || 'BatchCert_Archive'}_${exportFormat.toUpperCase()}.zip`;
     link.click();
     URL.revokeObjectURL(url);
 
@@ -1111,26 +1334,204 @@ export default function CertificateGenerator() {
     setExportProgress(0);
   };
 
-  const getFontFamily = (font) => {
-    switch (font) {
-      case 'serif': return "'Georgia', 'Times New Roman', serif";
-      case 'sans': return "'Inter', 'Helvetica', 'Arial', sans-serif";
-      case 'cursive': return "'Brush Script MT', 'Great Vibes', cursive";
-      case 'mono': return "'Courier New', monospace";
-      default: return 'sans-serif';
-    }
-  };
+  // Filtered and paginated awardees for sidebar list
+  const filteredSidebarAwardees = awardees
+    .map((a, idx) => ({ ...a, originalIdx: idx }))
+    .filter(a => (a.name || '').toLowerCase().includes(sidebarSearchQuery.toLowerCase()) || (a.position || '').toLowerCase().includes(sidebarSearchQuery.toLowerCase()));
+
+  const totalSidebarPages = Math.ceil(filteredSidebarAwardees.length / itemsPerPage);
+  const paginatedSidebarAwardees = filteredSidebarAwardees.slice(sidebarPage * itemsPerPage, (sidebarPage + 1) * itemsPerPage);
 
   return (
     <div className="flex flex-col h-screen bg-white text-zinc-900 font-sans overflow-hidden select-none">
       
-      {/* EXPORT MODAL */}
+      {/* KEYBOARD SHORTCUTS CHEAT SHEET MODAL */}
+      {isKeyboardModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white border border-purple-200 rounded-2xl w-[520px] max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+            <div className="p-4 border-b border-purple-100 flex justify-between items-center bg-purple-50/50">
+              <h3 className="text-xs font-bold text-purple-900 uppercase tracking-wider flex items-center gap-2">
+                <HelpCircle size={16} className="text-purple-600" /> Keyboard Shortcut Cheat Sheet
+              </h3>
+              <button 
+                onClick={() => setIsKeyboardModalOpen(false)}
+                className="text-zinc-400 hover:text-zinc-700 p-1 transition rounded-lg hover:bg-purple-100/50"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-3 text-xs text-zinc-700">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-purple-50/50 p-2.5 rounded-xl border border-purple-100 flex justify-between items-center">
+                  <span className="font-semibold text-zinc-800">Undo</span>
+                  <kbd className="bg-white px-2 py-1 rounded border border-purple-200 font-mono text-[11px] text-purple-900 font-bold shadow-sm">Ctrl + Z</kbd>
+                </div>
+                <div className="bg-purple-50/50 p-2.5 rounded-xl border border-purple-100 flex justify-between items-center">
+                  <span className="font-semibold text-zinc-800">Redo</span>
+                  <kbd className="bg-white px-2 py-1 rounded border border-purple-200 font-mono text-[11px] text-purple-900 font-bold shadow-sm">Ctrl + Y / Shift+Z</kbd>
+                </div>
+                <div className="bg-purple-50/50 p-2.5 rounded-xl border border-purple-100 flex justify-between items-center">
+                  <span className="font-semibold text-zinc-800">Save Project</span>
+                  <kbd className="bg-white px-2 py-1 rounded border border-purple-200 font-mono text-[11px] text-purple-900 font-bold shadow-sm">Ctrl + S</kbd>
+                </div>
+                <div className="bg-purple-50/50 p-2.5 rounded-xl border border-purple-100 flex justify-between items-center">
+                  <span className="font-semibold text-zinc-800">Select All Elements</span>
+                  <kbd className="bg-white px-2 py-1 rounded border border-purple-200 font-mono text-[11px] text-purple-900 font-bold shadow-sm">Ctrl + A</kbd>
+                </div>
+                <div className="bg-purple-50/50 p-2.5 rounded-xl border border-purple-100 flex justify-between items-center">
+                  <span className="font-semibold text-zinc-800">Toggle Bold</span>
+                  <kbd className="bg-white px-2 py-1 rounded border border-purple-200 font-mono text-[11px] text-purple-900 font-bold shadow-sm">Ctrl + B</kbd>
+                </div>
+                <div className="bg-purple-50/50 p-2.5 rounded-xl border border-purple-100 flex justify-between items-center">
+                  <span className="font-semibold text-zinc-800">Toggle Italic</span>
+                  <kbd className="bg-white px-2 py-1 rounded border border-purple-200 font-mono text-[11px] text-purple-900 font-bold shadow-sm">Ctrl + I</kbd>
+                </div>
+                <div className="bg-purple-50/50 p-2.5 rounded-xl border border-purple-100 flex justify-between items-center">
+                  <span className="font-semibold text-zinc-800">Toggle Underline</span>
+                  <kbd className="bg-white px-2 py-1 rounded border border-purple-200 font-mono text-[11px] text-purple-900 font-bold shadow-sm">Ctrl + U</kbd>
+                </div>
+                <div className="bg-purple-50/50 p-2.5 rounded-xl border border-purple-100 flex justify-between items-center">
+                  <span className="font-semibold text-zinc-800">Delete Selected</span>
+                  <kbd className="bg-white px-2 py-1 rounded border border-purple-200 font-mono text-[11px] text-purple-900 font-bold shadow-sm">Delete / Backspace</kbd>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-purple-100 space-y-1.5">
+                <span className="font-bold text-purple-950 block">Canvas Navigation & Nudging:</span>
+                <div className="bg-purple-50/30 p-3 rounded-xl border border-purple-100 space-y-1 text-[11px]">
+                  <p>• <strong className="text-zinc-800">Arrow Keys:</strong> Nudge selected element(s) by 0.5%</p>
+                  <p>• <strong className="text-zinc-800">Shift + Arrow Keys:</strong> Fast nudge selected element(s) by 2.0%</p>
+                  <p>• <strong className="text-zinc-800">Shift + Click:</strong> Multi-select individual canvas elements</p>
+                  <p>• <strong className="text-zinc-800">Click & Drag on Canvas:</strong> Multi-select box (marquee selection)</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-purple-100 bg-purple-50/50 flex justify-end">
+              <button 
+                onClick={() => setIsKeyboardModalOpen(false)}
+                className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow transition"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CSV INSTRUCTIONS MODAL */}
+      {isCsvModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white border border-purple-200 rounded-2xl w-[520px] max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+            <div className="p-4 border-b border-purple-100 flex justify-between items-center bg-purple-50/50">
+              <h3 className="text-xs font-bold text-purple-900 uppercase tracking-wider flex items-center gap-2">
+                <Info size={16} className="text-purple-600" /> How to use Dynamic CSV Mapping
+              </h3>
+              <button 
+                onClick={() => setIsCsvModalOpen(false)}
+                className="text-zinc-400 hover:text-zinc-700 p-1 transition rounded-lg hover:bg-purple-100/50"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-4 text-xs text-zinc-700 leading-relaxed">
+              <ol className="list-decimal list-inside space-y-2.5 font-medium">
+                <li>
+                  <strong className="text-purple-950">Define Custom Headers:</strong> Set your column headers in row 1 of your CSV file (e.g., <code className="bg-purple-100 text-purple-900 px-1.5 py-0.5 rounded font-mono text-[11px]">Name, Position, IssueDate, CertificateID</code>).
+                </li>
+                <li>
+                  <strong className="text-purple-950">Import Your CSV File:</strong> Click the <span className="bg-purple-100 text-purple-900 px-1.5 py-0.5 rounded font-semibold">CSV Import</span> button under the Data tab to load your entire dataset.
+                </li>
+                <li>
+                  <strong className="text-purple-950">Bind Placeholders:</strong> Click any tag under <span className="bg-purple-100 text-purple-900 px-1.5 py-0.5 rounded font-semibold">Dynamic CSV Tags</span> or manually type <code className="bg-purple-100 text-purple-900 px-1.5 py-0.5 rounded font-mono text-[11px]">{`{{HeaderName}}`}</code> into any canvas text box or QR code data field.
+                </li>
+                <li>
+                  <strong className="text-purple-950">Automatic Generation:</strong> During batch export or canvas preview, each placeholder will dynamically load each individual awardee's unique record.
+                </li>
+              </ol>
+
+              <div className="pt-2 border-t border-purple-100">
+                <span className="text-[11px] font-bold text-purple-900 block mb-1.5">Example CSV Format:</span>
+                <div className="bg-zinc-900 text-purple-200 p-3 rounded-xl font-mono text-[11px] leading-relaxed shadow-inner border border-zinc-800">
+                  <span className="text-zinc-500">// Row 1 defines available variables</span><br />
+                  Name,Position,IssueDate,CertificateID<br />
+                  <span className="text-zinc-500">// Subsequent rows contain awardee data</span><br />
+                  Juan Dela Cruz,Keynote Speaker,August 2026,CERT-2026-001<br />
+                  Maria Clara,Participant,August 2026,CERT-2026-002
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-purple-100 bg-purple-50/50 flex justify-end">
+              <button 
+                onClick={() => setIsCsvModalOpen(false)}
+                className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow transition"
+              >
+                Got it!
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* QR CODE INSTRUCTIONS MODAL */}
+      {isQrModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white border border-purple-200 rounded-2xl w-[520px] max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+            <div className="p-4 border-b border-purple-100 flex justify-between items-center bg-purple-50/50">
+              <h3 className="text-xs font-bold text-purple-900 uppercase tracking-wider flex items-center gap-2">
+                <Info size={16} className="text-purple-600" /> How to use the QR Code Element
+              </h3>
+              <button 
+                onClick={() => setIsQrModalOpen(false)}
+                className="text-zinc-400 hover:text-zinc-700 p-1 transition rounded-lg hover:bg-purple-100/50"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-4 text-xs text-zinc-700 leading-relaxed">
+              <ol className="list-decimal list-inside space-y-2.5 font-medium">
+                <li>
+                  <strong className="text-purple-950">Add to Canvas:</strong> Click the <span className="bg-purple-100 text-purple-900 px-1.5 py-0.5 rounded font-semibold">Add QR Code Element</span> button under the Design tab.
+                </li>
+                <li>
+                  <strong className="text-purple-950">Set the Data/URL:</strong> Select the QR code on the canvas. In the top toolbar, enter your custom URL or verification link.
+                </li>
+                <li>
+                  <strong className="text-purple-950">Use Dynamic Tags:</strong> Make each QR code unique by using CSV tags (e.g., <code className="bg-purple-100 text-purple-900 px-1.5 py-0.5 rounded font-mono text-[11px]">{'https://verify.cert/{{Name}}'}</code>).
+                </li>
+                <li>
+                  <strong className="text-purple-950">Resize & Position:</strong> Drag the QR code to move it on the canvas, and use the side handle or toolbar size control to scale it.
+                </li>
+              </ol>
+
+              <div className="bg-purple-50/60 border border-purple-200 p-3.5 rounded-xl text-purple-950 text-[11px] font-medium leading-relaxed shadow-inner">
+                <span className="font-bold block mb-1">Automatic Generation:</span> QR codes will automatically render unique codes for every single awardee during batch PDF or PNG ZIP export!
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-purple-100 bg-purple-50/50 flex justify-end">
+              <button 
+                onClick={() => setIsQrModalOpen(false)}
+                className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow transition"
+              >
+                Got it!
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EXPORT MODAL WITH FORMAT & QUALITY CONTROLS */}
       {isExportModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white border border-purple-200 rounded-xl w-[520px] max-h-[80vh] flex flex-col shadow-2xl">
+          <div className="bg-white border border-purple-200 rounded-xl w-[520px] max-h-[85vh] flex flex-col shadow-2xl">
             <div className="p-4 border-b border-purple-100 flex justify-between items-center bg-purple-50/50 rounded-t-xl">
               <h3 className="text-sm font-bold text-purple-900 uppercase tracking-wider flex items-center gap-2">
-                <Download size={16} className="text-purple-700" /> Export BatchCertificates (.zip Archive)
+                <Download size={16} className="text-purple-700" /> Export Batch Certificates (.zip Archive)
               </h3>
               <button 
                 onClick={() => setIsExportModalOpen(false)}
@@ -1141,6 +1542,35 @@ export default function CertificateGenerator() {
             </div>
 
             <div className="p-5 flex-1 overflow-y-auto space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-zinc-700 block mb-1.5 flex items-center gap-1.5">
+                  <FileType size={14} className="text-purple-600" /> Export File Format:
+                </label>
+                <select 
+                  value={exportFormat}
+                  onChange={(e) => setExportFormat(e.target.value)}
+                  className="w-full bg-purple-50/50 border border-purple-200 rounded-lg p-2.5 text-xs text-purple-950 font-bold focus:outline-none focus:border-purple-600 shadow-sm cursor-pointer"
+                >
+                  <option value="pdf">PDF Archive (.zip with individual PDFs)</option>
+                  <option value="png">High-Res PNG Archive (.zip with scale images)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-zinc-700 block mb-1.5 flex items-center gap-1.5">
+                  <Sliders size={14} className="text-purple-600" /> Export Quality & Scale:
+                </label>
+                <select 
+                  value={exportScale}
+                  onChange={(e) => setExportScale(Number(e.target.value))}
+                  className="w-full bg-purple-50/50 border border-purple-200 rounded-lg p-2.5 text-xs text-purple-950 font-bold focus:outline-none focus:border-purple-600 shadow-sm cursor-pointer"
+                >
+                  <option value={1}>1x (Draft Quality - Fast & Low Memory)</option>
+                  <option value={2}>2x (HD Print Quality - Recommended)</option>
+                  <option value={3}>3x (Ultra HD Print Quality - Heavy)</option>
+                </select>
+              </div>
+
               <div>
                 <label className="text-xs font-semibold text-zinc-700 block mb-2">Select Export Scope:</label>
                 <div className="grid grid-cols-2 gap-3">
@@ -1211,7 +1641,7 @@ export default function CertificateGenerator() {
                 disabled={exportMode === 'selected' && selectedExportIndices.length === 0}
                 className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded shadow transition disabled:opacity-50 flex items-center gap-2"
               >
-                <Download size={14} /> Generate & Download ZIP
+                <Download size={14} /> Generate & Download {exportFormat.toUpperCase()} ZIP
               </button>
             </div>
           </div>
@@ -1226,22 +1656,22 @@ export default function CertificateGenerator() {
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 100" width="100%" height="100%" className="h-9 w-auto flex-shrink-0">
                 <defs>
                   <linearGradient id="purpleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stop-color="#9333ea" />
-                    <stop offset="100%" stop-color="#581c87" />
+                    <stop offset="0%" stopColor="#9333ea" />
+                    <stop offset="100%" stopColor="#581c87" />
                   </linearGradient>
                 </defs>
                 
                 <g transform="translate(10, 15) scale(0.75)">
                   <rect x="12" y="12" width="64" height="64" rx="8" fill="#f3e8ff" opacity="0.6" />
                   <rect x="4" y="4" width="64" height="64" rx="8" fill="url(#purpleGradient)" />
-                  <line x1="16" y1="20" x2="44" y2="20" stroke="#ffffff" stroke-width="4" stroke-linecap="round" />
-                  <line x1="16" y1="32" x2="56" y2="32" stroke="#ffffff" stroke-width="3" stroke-linecap="round" opacity="0.8" />
-                  <line x1="16" y1="44" x2="36" y2="44" stroke="#ffffff" stroke-width="3" stroke-linecap="round" opacity="0.8" />
+                  <line x1="16" y1="20" x2="44" y2="20" stroke="#ffffff" strokeWidth="4" strokeLinecap="round" />
+                  <line x1="16" y1="32" x2="56" y2="32" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" opacity="0.8" />
+                  <line x1="16" y1="44" x2="36" y2="44" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" opacity="0.8" />
                   <circle cx="50" cy="50" r="14" fill="#ffffff" />
-                  <path d="M44 50 L48 54 L57 44" fill="none" stroke="#581c87" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+                  <path d="M44 50 L48 54 L57 44" fill="none" stroke="#581c87" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
                 </g>
-                <text x="80" y="58" font-family="'Inter', 'Helvetica', sans-serif" font-size="28" font-weight="800" fill="#581c87" letter-spacing="-0.5">
-                  Batch<tspan font-weight="400" fill="#9333ea">Cert</tspan>
+                <text x="80" y="58" fontFamily="'Inter', 'Helvetica', sans-serif" fontSize="28" fontWeight="800" fill="#581c87" letterSpacing="-0.5">
+                  Batch<tspan fontWeight="400" fill="#9333ea">Cert</tspan>
                 </text>
               </svg>
               </span>
@@ -1268,14 +1698,25 @@ export default function CertificateGenerator() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] text-zinc-500 font-medium">Project Name:</span>
-            <input 
-              type="text" 
-              value={projectName} 
-              onChange={(e) => setProjectName(e.target.value)}
-              className="bg-purple-50/60 border border-purple-200 text-xs text-purple-950 font-semibold px-2.5 py-1 rounded focus:outline-none focus:border-purple-600 w-48 shadow-inner"
-            />
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-zinc-500 font-medium">Project Name:</span>
+              <input 
+                type="text" 
+                value={projectName} 
+                onChange={(e) => setProjectName(e.target.value)}
+                className="bg-purple-50/60 border border-purple-200 text-xs text-purple-950 font-semibold px-2.5 py-1 rounded focus:outline-none focus:border-purple-600 w-44 shadow-inner"
+              />
+            </div>
+
+            {/* Keyboard Shortcut Cheat Sheet Modal Trigger (?) */}
+            <button
+              onClick={() => setIsKeyboardModalOpen(true)}
+              className="p-1.5 bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 rounded-full transition shadow-sm flex items-center justify-center"
+              title="Keyboard Shortcuts Cheat Sheet"
+            >
+              <HelpCircle size={16} className="text-purple-700" />
+            </button>
           </div>
         </div>
       )}
@@ -1326,7 +1767,6 @@ export default function CertificateGenerator() {
                         type="text" 
                         value={globalData.orgName} 
                         onChange={e => handleGlobalDataChange('orgName', e.target.value)}
-                        placeholder=""
                         className="w-full mt-1 bg-white border border-purple-200 rounded px-2.5 py-1.5 text-xs text-zinc-900 focus:outline-none focus:border-purple-600 shadow-sm"
                       />
                     </div>
@@ -1336,7 +1776,6 @@ export default function CertificateGenerator() {
                         rows={2}
                         value={globalData.orgSubtext} 
                         onChange={e => handleGlobalDataChange('orgSubtext', e.target.value)}
-                        placeholder=""
                         className="w-full mt-1 bg-white border border-purple-200 rounded p-1.5 text-xs text-zinc-900 focus:outline-none focus:border-purple-600 shadow-sm"
                       />
                     </div>
@@ -1346,7 +1785,6 @@ export default function CertificateGenerator() {
                         type="text" 
                         value={globalData.certificateTitle} 
                         onChange={e => handleGlobalDataChange('certificateTitle', e.target.value)}
-                        placeholder=""
                         className="w-full mt-1 bg-white border border-purple-200 rounded px-2.5 py-1.5 text-xs text-zinc-900 focus:outline-none focus:border-purple-600 shadow-sm"
                       />
                     </div>
@@ -1356,7 +1794,6 @@ export default function CertificateGenerator() {
                         rows={3}
                         value={globalData.eventDuties} 
                         onChange={e => handleGlobalDataChange('eventDuties', e.target.value)}
-                        placeholder=""
                         className="w-full mt-1 bg-white border border-purple-200 rounded p-1.5 text-xs text-purple-950 font-medium focus:outline-none focus:border-purple-600 shadow-sm"
                       />
                     </div>
@@ -1366,7 +1803,6 @@ export default function CertificateGenerator() {
                         rows={3}
                         value={globalData.bodyTemplate} 
                         onChange={e => handleGlobalDataChange('bodyTemplate', e.target.value)}
-                        placeholder=""
                         className="w-full mt-1 bg-white border border-purple-200 rounded p-1.5 text-xs text-zinc-900 focus:outline-none focus:border-purple-600 shadow-sm"
                       />
                     </div>
@@ -1376,87 +1812,158 @@ export default function CertificateGenerator() {
                         rows={2}
                         value={globalData.dateLine} 
                         onChange={e => handleGlobalDataChange('dateLine', e.target.value)}
-                        placeholder=""
                         className="w-full mt-1 bg-white border border-purple-200 rounded p-1.5 text-xs text-zinc-900 focus:outline-none focus:border-purple-600 shadow-sm"
                       />
                     </div>
                   </div>
 
-                  {/* Awardees List */}
+                  {/* Dynamic CSV Placeholders Bar */}
+                  <div className="space-y-2 bg-purple-50/40 p-3 rounded-xl border border-purple-100 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-purple-900">
+                        <Tag size={14} className="text-purple-600" />
+                        <span>Dynamic CSV Tags</span>
+                      </div>
+                      <span className="text-[10px] text-zinc-500 font-medium">Click tag to insert into canvas</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {csvHeaders.map((headerKey) => (
+                        <button
+                          key={headerKey}
+                          onClick={() => insertTagIntoCanvas(headerKey)}
+                          className="px-2 py-1 bg-white hover:bg-purple-100 border border-purple-200 rounded text-[11px] font-mono text-purple-900 font-semibold shadow-sm transition flex items-center gap-1"
+                          title={`Insert {{${headerKey}}} into canvas`}
+                        >
+                          <Plus size={10} className="text-purple-600" />
+                          {`{{${headerKey}}}`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Awardees List with Search & Pagination */}
                   <div className="space-y-3">
                     <div className="flex justify-between items-center">
-                      <h3 className="text-xs font-bold text-purple-900 uppercase tracking-wider">Awardees List ({awardees.length})</h3>
+                      <div className="flex items-center gap-1.5">
+                        <h3 className="text-xs font-bold text-purple-900 uppercase tracking-wider">Awardees List ({awardees.length})</h3>
+                        <button 
+                          onClick={() => setIsCsvModalOpen(true)}
+                          className="text-purple-600 hover:text-purple-800 p-0.5 rounded-full hover:bg-purple-100 transition"
+                          title="Click to view Dynamic CSV Mapping instructions"
+                        >
+                          <Info className="w-4 h-4" />
+                        </button>
+                      </div>
+
                       <label className="text-xs bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 px-2.5 py-1 rounded-md cursor-pointer flex items-center gap-1 font-semibold transition shadow-sm">
                         <Upload size={12} className="text-purple-600" /> CSV Import
                         <input type="file" accept=".csv" onChange={handleCSVImport} className="hidden" />
                       </label>
                     </div>
-                    <div className="p-2.5 bg-purple-50/60 border border-purple-200/80 rounded-xl space-y-1 text-xs">
-                            <div className="flex items-center gap-1.5 font-semibold text-purple-900">
-                              <Info className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-                              <span>CSV Format Requirement</span>
-                            </div>
-                            <p className="text-[11px] text-gray-600 leading-tight">
-                              First row header required: <b>Name, Position</b>
-                            </p>
-                            <div className="bg-white/80 border border-purple-100 p-1.5 rounded-lg text-[10px] font-mono text-purple-800 leading-tight">
-                              Name,Position<br />
-                              Juan Dela Cruz,Speaker<br />
-                              Maria Clara,Participant
-                            </div>
-                            <p className="text-[11px] text-gray-600 leading-tight">
-                            <b>Optional:</b> Add "" double quotes for positions with commas. <b>e.g ("Dean, College of Science")</b>
-                            </p>
-                    </div>
-                    <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                      {awardees.map((item, idx) => (
-                        <div 
-                          key={item.id} 
-                          onClick={() => setCurrentAwardeeIdx(idx)}
-                          className={`p-3 rounded-xl border flex flex-col gap-2 cursor-pointer transition shadow-sm ${currentAwardeeIdx === idx ? 'border-purple-600 bg-purple-50/50' : 'border-purple-100 bg-white hover:bg-purple-50/20'}`}
-                        >
-                          <div className="flex justify-between items-center">
-                            <input 
-                              type="text" 
-                              value={item.name} 
-                              onChange={(e) => handleAwardeeChange('name', e.target.value)}
-                              placeholder="Awardee Name"
-                              className="w-full bg-transparent font-bold text-sm text-zinc-900 focus:outline-none"
-                            />
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); if (awardees.length > 1) setAwardees(awardees.filter((_, i) => i !== idx)); }}
-                              className="text-zinc-400 hover:text-red-500 p-1 transition"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                          
-                          <div>
-                            <label className="text-[10px] text-purple-700 block font-bold uppercase">POSITION</label>
-                            <input 
-                              type="text" 
-                              value={item.position} 
-                              onChange={(e) => handleAwardeeChange('position', e.target.value)}
-                              placeholder="Position / Designation"
-                              className="w-full bg-white border border-purple-200 rounded px-2 py-1 text-xs text-purple-950 font-semibold focus:outline-none focus:border-purple-600 uppercase shadow-sm"
-                            />
-                          </div>
 
-                          <div className="pt-2 border-t border-purple-100 flex items-center justify-between">
-                            <span className="text-[11px] text-zinc-600 font-medium">Separate Custom Layout</span>
-                            <input 
-                              type="checkbox"
-                              checked={!!item.hasCustomLayout}
-                              onChange={() => toggleAwardeeCustomLayout(idx)}
-                              className="w-4 h-4 accent-purple-600 cursor-pointer rounded"
-                            />
-                          </div>
-                        </div>
-                      ))}
+                    {/* Sidebar Search Input */}
+                    <div className="flex items-center gap-1.5 bg-purple-50/60 border border-purple-200 rounded-lg px-2.5 py-1.5 shadow-sm">
+                      <Search size={14} className="text-purple-600" />
+                      <input 
+                        type="text" 
+                        value={sidebarSearchQuery} 
+                        onChange={(e) => { setSidebarSearchQuery(e.target.value); setSidebarPage(0); }}
+                        placeholder="Search awardees by name or position..."
+                        className="bg-transparent text-xs text-zinc-900 focus:outline-none w-full font-medium"
+                      />
+                      {sidebarSearchQuery && (
+                        <button onClick={() => setSidebarSearchQuery('')} className="text-zinc-400 hover:text-zinc-600 text-xs font-bold">×</button>
+                      )}
                     </div>
+
+                    <div className="space-y-2">
+                      {paginatedSidebarAwardees.map((item) => {
+                        const idx = item.originalIdx;
+                        return (
+                          <div 
+                            key={item.id} 
+                            onClick={() => setCurrentAwardeeIdx(idx)}
+                            className={`p-3 rounded-xl border flex flex-col gap-2 cursor-pointer transition shadow-sm ${currentAwardeeIdx === idx ? 'border-purple-600 bg-purple-50/50' : 'border-purple-100 bg-white hover:bg-purple-50/20'}`}
+                          >
+                            <div className="flex justify-between items-center">
+                              <input 
+                                type="text" 
+                                value={item.name} 
+                                onChange={(e) => handleAwardeeChange('name', e.target.value)}
+                                placeholder="Awardee Name"
+                                className="w-full bg-transparent font-bold text-sm text-zinc-900 focus:outline-none"
+                              />
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); if (awardees.length > 1) setAwardees(awardees.filter((_, i) => i !== idx)); }}
+                                className="text-zinc-400 hover:text-red-500 p-1 transition"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                            
+                            <div>
+                              <label className="text-[10px] text-purple-700 block font-bold uppercase">POSITION</label>
+                              <input 
+                                type="text" 
+                                value={item.position} 
+                                onChange={(e) => handleAwardeeChange('position', e.target.value)}
+                                placeholder="Position / Designation"
+                                className="w-full bg-white border border-purple-200 rounded px-2 py-1 text-xs text-purple-950 font-semibold focus:outline-none focus:border-purple-600 uppercase shadow-sm"
+                              />
+                            </div>
+
+                            {item.csvData && Object.keys(item.csvData).some(k => k.toLowerCase() !== 'name' && k.toLowerCase() !== 'position') && (
+                              <div className="pt-2 border-t border-purple-100/80 space-y-1">
+                                <span className="text-[10px] text-purple-800 font-bold uppercase block">Additional CSV Fields</span>
+                                <div className="grid grid-cols-2 gap-1 text-[10px]">
+                                  {Object.entries(item.csvData)
+                                    .filter(([k]) => k.toLowerCase() !== 'name' && k.toLowerCase() !== 'position')
+                                    .map(([k, v]) => (
+                                      <div key={k} className="bg-purple-50/50 p-1 rounded border border-purple-100 truncate">
+                                        <span className="font-bold text-purple-900">{k}:</span> {v}
+                                      </div>
+                                    ))}
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="pt-2 border-t border-purple-100 flex items-center justify-between">
+                              <span className="text-[11px] text-zinc-600 font-medium">Separate Custom Layout</span>
+                              <input 
+                                type="checkbox"
+                                checked={!!item.hasCustomLayout}
+                                onChange={() => toggleAwardeeCustomLayout(idx)}
+                                className="w-4 h-4 accent-purple-600 cursor-pointer rounded"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Sidebar Pagination Controls */}
+                    {totalSidebarPages > 1 && (
+                      <div className="flex items-center justify-between pt-2 border-t border-purple-100 text-xs text-zinc-600">
+                        <button 
+                          onClick={() => setSidebarPage(p => Math.max(0, p - 1))}
+                          disabled={sidebarPage === 0}
+                          className="px-2.5 py-1 bg-white border border-purple-200 rounded font-semibold disabled:opacity-40 hover:bg-purple-50 transition shadow-sm"
+                        >
+                          Previous
+                        </button>
+                        <span>Page {sidebarPage + 1} of {totalSidebarPages}</span>
+                        <button 
+                          onClick={() => setSidebarPage(p => Math.min(totalSidebarPages - 1, p + 1))}
+                          disabled={sidebarPage >= totalSidebarPages - 1}
+                          className="px-2.5 py-1 bg-white border border-purple-200 rounded font-semibold disabled:opacity-40 hover:bg-purple-50 transition shadow-sm"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    )}
 
                     <button 
-                      onClick={() => setAwardees([...awardees, { id: String(Date.now()), name: '', position: '', hasCustomLayout: false, customElements: null, customSignatories: null }])} 
+                      onClick={() => setAwardees([...awardees, { id: String(Date.now()), name: '', position: '', csvData: { Name: '', Position: '' }, hasCustomLayout: false, customElements: null, customSignatories: null }])} 
                       className="w-full py-2 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg text-xs font-bold text-purple-900 flex items-center justify-center gap-1 transition shadow-sm"
                     >
                       <Plus size={14} /> Add Awardee
@@ -1538,12 +2045,31 @@ export default function CertificateGenerator() {
               {/* TAB 3: DESIGN & TOOLS */}
               {activeTab === 'design' && (
                 <div className="space-y-6">
+                  {/* Canvas Orientation & Dimension Presets */}
+                  <div className="space-y-2 bg-purple-50/30 p-3.5 rounded-xl border border-purple-100 shadow-sm">
+                    <h3 className="text-xs font-bold text-purple-900 uppercase tracking-wider flex items-center gap-1.5">
+                      <Layout size={14} className="text-purple-600" /> Page Orientation & Dimensions
+                    </h3>
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      {CANVAS_PRESETS.map(preset => (
+                        <button
+                          key={preset.id}
+                          onClick={() => setCanvasSize({ width: preset.width, height: preset.height, label: preset.name })}
+                          className={`p-2 text-[11px] font-medium border rounded-xl flex flex-col items-center gap-1 transition shadow-sm ${canvasSize.width === preset.width && canvasSize.height === preset.height ? 'border-purple-600 bg-purple-50 text-purple-900 ring-1 ring-purple-600' : 'border-zinc-200 text-zinc-600 bg-white hover:bg-purple-50/30'}`}
+                        >
+                          <span className="font-bold">{preset.name}</span>
+                          <span className="text-[9px] text-zinc-400">{preset.width} × {preset.height}px</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   {/* Custom Template Saving / Loading */}
                   <div className="space-y-2 bg-purple-50/30 p-3.5 rounded-xl border border-purple-100 shadow-sm">
                     <h3 className="text-xs font-bold text-purple-900 uppercase tracking-wider flex items-center gap-1.5">
                       <PenTool size={14} className="text-purple-600" /> Layout Template Management
                     </h3>
-                    <p className="text-[11px] text-zinc-500">Save positions, fonts, logo, and signers as a reusable template.</p>
+                    <p className="text-[11px] text-zinc-500">Save positions, dimensions, fonts, logo, and signers as a reusable template.</p>
                     <div className="flex gap-2 pt-1">
                       <button 
                         onClick={handleSaveLayoutTemplate}
@@ -1657,19 +2183,36 @@ export default function CertificateGenerator() {
                   </div>
 
                   <div className="space-y-2 pt-2 border-t border-purple-100">
-                    <label className="text-xs font-bold text-purple-900 uppercase tracking-wider block">Canvas Tools</label>
-                    <div className="flex gap-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-purple-900 uppercase tracking-wider block">Canvas Tools</label>
                       <button 
-                        onClick={addTextElement}
-                        className="flex-1 py-2 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg text-xs font-bold text-purple-900 flex items-center justify-center gap-1 transition shadow-sm"
+                        onClick={() => setIsQrModalOpen(true)}
+                        className="text-purple-600 hover:text-purple-800 p-0.5 rounded-full hover:bg-purple-100 transition flex items-center gap-1 text-[11px] font-semibold"
+                        title="Click to view QR Code instructions"
                       >
-                        <Plus size={14} /> Add Text Box
+                        <Info className="w-4 h-4" /> QR Guide
                       </button>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={addTextElement}
+                          className="flex-1 py-2 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg text-xs font-bold text-purple-900 flex items-center justify-center gap-1 transition shadow-sm"
+                        >
+                          <Plus size={14} /> Add Text Box
+                        </button>
+                        <button 
+                          onClick={addLineElement}
+                          className="flex-1 py-2 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg text-xs font-bold text-purple-900 flex items-center justify-center gap-1 transition shadow-sm"
+                        >
+                          <Minus size={14} /> Add Line Tool
+                        </button>
+                      </div>
                       <button 
-                        onClick={addLineElement}
-                        className="flex-1 py-2 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg text-xs font-bold text-purple-900 flex items-center justify-center gap-1 transition shadow-sm"
+                        onClick={addQRCodeElement}
+                        className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition shadow-sm"
                       >
-                        <Minus size={14} /> Add Line Tool
+                        <QrCode size={14} /> Add QR Code Element
                       </button>
                     </div>
                   </div>
@@ -1686,7 +2229,7 @@ export default function CertificateGenerator() {
                     {activeElements.slice().reverse().map((el, revIdx) => {
                       const actualIdx = activeElements.length - 1 - revIdx;
                       const isSelected = selectedIds.includes(el.id);
-                      const displayName = el.label || el.key || (el.type === 'line' ? 'Horizontal Line' : (el.text ? el.text.substring(0, 20) : el.id));
+                      const displayName = el.label || el.key || (el.type === 'line' ? 'Horizontal Line' : (el.type === 'qrcode' ? 'QR Code' : (el.text ? el.text.substring(0, 20) : el.id)));
                       
                       return (
                         <div 
@@ -1773,13 +2316,13 @@ export default function CertificateGenerator() {
             </button>
           )}
 
-          {/* CANVAS TOOLBAR (Hidden in Preview Mode) */}
+          {/* FIXED HEIGHT CANVAS TOOLBAR */}
           {!isPreviewMode && (
-            <div className="min-h-[56px] border-b border-purple-200 bg-white/95 backdrop-blur px-4 py-2 flex flex-wrap items-center justify-between gap-3 z-20 shadow-sm">
+            <div className="h-14 shrink-0 border-b border-purple-200 bg-white/95 backdrop-blur px-4 flex items-center justify-between gap-3 z-20 shadow-sm overflow-x-auto whitespace-nowrap">
               
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-3 shrink-0">
                 {/* QUICK AWARDEE SWITCHER DROPDOWN */}
-                <div className="flex items-center gap-1 bg-purple-50/80 border border-purple-200 rounded-lg px-1.5 py-1 relative shadow-sm">
+                <div className="flex items-center gap-1 bg-purple-50/80 border border-purple-200 rounded-lg px-1.5 py-1 relative shadow-sm shrink-0">
                   <button 
                     onClick={() => setCurrentAwardeeIdx(prev => Math.max(0, prev - 1))}
                     disabled={currentAwardeeIdx === 0}
@@ -1846,7 +2389,7 @@ export default function CertificateGenerator() {
 
                 {/* Alignment & Distribution Tools */}
                 {selectedIds.length > 0 && (
-                  <div className="flex items-center gap-1 border border-purple-200 rounded-lg px-2 py-1 bg-purple-50/50 shadow-sm">
+                  <div className="flex items-center gap-1 border border-purple-200 rounded-lg px-2 py-1 bg-purple-50/50 shadow-sm shrink-0">
                     <span className="text-[10px] text-purple-900 uppercase font-bold mr-1">Align:</span>
                     <button onClick={() => handleAlign('left')} className="p-1 text-zinc-700 hover:text-purple-700 hover:bg-purple-100 rounded transition" title="Align Left"><AlignLeft size={14} /></button>
                     <button onClick={() => handleAlign('center')} className="p-1 text-zinc-700 hover:text-purple-700 hover:bg-purple-100 rounded transition" title="Align Center"><AlignCenter size={14} /></button>
@@ -1859,22 +2402,47 @@ export default function CertificateGenerator() {
                         <button onClick={() => handleDistribute('vertical')} className="px-1.5 py-0.5 text-[10px] text-purple-900 hover:bg-purple-200 bg-purple-100 rounded font-bold transition" title="Distribute Vertically">V</button>
                       </>
                     )}
+                    <button onClick={deleteSelectedElements} className="ml-2 px-2 py-0.5 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 rounded text-xs font-semibold transition">Delete ({selectedIds.length})</button>
                   </div>
                 )}
 
                 {selectedIds.length === 1 && primarySelectedElement && primarySelectedElement.type === 'text' ? (
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-2 shrink-0">
                     <select 
                       value={primarySelectedElement.font} 
                       onChange={e => updateSelectedElement('font', e.target.value)}
-                      className="bg-white text-xs border border-purple-200 rounded-lg px-2.5 py-1 text-zinc-800 font-medium shadow-sm focus:outline-none focus:border-purple-600"
+                      className="bg-white text-xs border border-purple-200 rounded-lg px-2.5 py-1 text-zinc-800 font-medium shadow-sm focus:outline-none focus:border-purple-600 max-w-[160px]"
                     >
-                      <option value="serif">Classic Serif</option>
-                      <option value="sans">Modern Sans</option>
-                      <option value="cursive">Calligraphy</option>
+                      <optgroup label="Serif / Academic">
+                        <option value="Cinzel">Cinzel</option>
+                        <option value="Playfair Display">Playfair Display</option>
+                        <option value="Cormorant Garamond">Cormorant Garamond</option>
+                        <option value="Merriweather">Merriweather</option>
+                        <option value="Bodoni Moda">Bodoni Moda</option>
+                        <option value="serif">Georgia (System)</option>
+                      </optgroup>
+                      <optgroup label="Sans-Serif / Modern">
+                        <option value="Inter">Inter</option>
+                        <option value="Montserrat">Montserrat</option>
+                        <option value="Poppins">Poppins</option>
+                        <option value="Roboto">Roboto</option>
+                        <option value="Oswald">Oswald</option>
+                        <option value="sans">System Sans</option>
+                      </optgroup>
+                      <optgroup label="Calligraphy / Script">
+                        <option value="Great Vibes">Great Vibes</option>
+                        <option value="Alex Brush">Alex Brush</option>
+                        <option value="Dancing Script">Dancing Script</option>
+                        <option value="Pinyon Script">Pinyon Script</option>
+                        <option value="Allura">Allura</option>
+                        <option value="cursive">System Cursive</option>
+                      </optgroup>
+                      <optgroup label="Monospace">
+                        <option value="mono">Courier New (System)</option>
+                      </optgroup>
                     </select>
 
-                    <div className="flex items-center gap-1 border border-purple-200 rounded-lg px-2 py-1 bg-white shadow-sm">
+                    <div className="flex items-center gap-1 border border-purple-200 rounded-lg px-2 py-1 bg-white shadow-sm shrink-0">
                       <span className="text-xs text-zinc-500 font-medium">Size:</span>
                       <input 
                         type="number" 
@@ -1885,7 +2453,7 @@ export default function CertificateGenerator() {
                       <span className="text-xs text-zinc-400">px</span>
                     </div>
 
-                    <div className="flex items-center gap-1 border border-purple-200 rounded-lg px-2 py-1 bg-white shadow-sm">
+                    <div className="flex items-center gap-1 border border-purple-200 rounded-lg px-2 py-1 bg-white shadow-sm shrink-0">
                       <span className="text-xs text-zinc-500 font-medium">Color:</span>
                       <input 
                         type="color" 
@@ -1895,15 +2463,15 @@ export default function CertificateGenerator() {
                       />
                     </div>
 
-                    <div className="flex border border-purple-200 rounded-lg overflow-hidden bg-white shadow-sm">
+                    <div className="flex border border-purple-200 rounded-lg overflow-hidden bg-white shadow-sm shrink-0">
                       <button onClick={() => applyTextFormat('bold')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 transition" title="Bold"><Bold size={14} /></button>
                       <button onClick={() => applyTextFormat('italic')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 transition" title="Italic"><Italic size={14} /></button>
                       <button onClick={() => applyTextFormat('underline')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 transition" title="Underline"><Underline size={14} /></button>
                     </div>
-                    <button onClick={deleteSelectedElements} className="px-2.5 py-1 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 rounded-lg text-xs font-semibold shadow-sm transition">Delete</button>
+                    <button onClick={deleteSelectedElements} className="px-2.5 py-1 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 rounded-lg text-xs font-semibold shadow-sm transition shrink-0">Delete</button>
                   </div>
                 ) : selectedIds.length === 1 && primarySelectedElement && (primarySelectedElement.type === 'line' || primarySelectedElement.type === 'logo') ? (
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-2 shrink-0">
                     <span className="text-xs text-purple-900 font-bold">{primarySelectedElement.type === 'logo' ? 'Logo Element:' : 'Line Tool:'}</span>
                     <div className="flex items-center gap-1 border border-purple-200 rounded-lg px-2 py-1 bg-white shadow-sm">
                       <span className="text-xs text-zinc-500 font-medium">Width:</span>
@@ -1917,10 +2485,35 @@ export default function CertificateGenerator() {
                     </div>
                     <button onClick={deleteSelectedElements} className="px-2.5 py-1 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 rounded-lg text-xs font-semibold shadow-sm transition">Delete</button>
                   </div>
+                ) : selectedIds.length === 1 && primarySelectedElement && primarySelectedElement.type === 'qrcode' ? (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-xs text-purple-900 font-bold flex items-center gap-1"><QrCode size={14} /> QR Code:</span>
+                    <div className="flex items-center gap-1 border border-purple-200 rounded-lg px-2 py-1 bg-white shadow-sm">
+                      <span className="text-xs text-zinc-500 font-medium">Data/URL:</span>
+                      <input 
+                        type="text" 
+                        value={primarySelectedElement.data || ''} 
+                        onChange={e => updateSelectedElement('data', e.target.value)}
+                        className="w-44 bg-transparent text-xs text-zinc-900 font-semibold focus:outline-none"
+                        placeholder="Enter URL or text"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1 border border-purple-200 rounded-lg px-2 py-1 bg-white shadow-sm">
+                      <span className="text-xs text-zinc-500 font-medium">Size:</span>
+                      <input 
+                        type="number" 
+                        value={primarySelectedElement.size || 90} 
+                        onChange={e => updateSelectedElement('size', Number(e.target.value))}
+                        className="w-12 bg-transparent text-xs text-zinc-900 font-semibold focus:outline-none"
+                      />
+                      <span className="text-xs text-zinc-400">px</span>
+                    </div>
+                    <button onClick={deleteSelectedElements} className="px-2.5 py-1 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 rounded-lg text-xs font-semibold shadow-sm transition">Delete</button>
+                  </div>
                 ) : null}
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 shrink-0">
                 {/* GUIDES TOGGLE BUTTON */}
                 <button 
                   onClick={() => setShowGuides(prev => !prev)}
@@ -1939,7 +2532,6 @@ export default function CertificateGenerator() {
                   <Maximize2 size={13} className="text-purple-600" /> Preview Mode
                 </button>
 
-                {/* Visible Undo / Redo Buttons */}
                 <div className="flex items-center gap-1 border border-purple-200 rounded-lg px-1.5 py-1 bg-white shadow-sm">
                   <button 
                     onClick={handleUndo} 
@@ -1974,16 +2566,14 @@ export default function CertificateGenerator() {
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
           >
-            {/* SCALED WRAPPER CONTAINER */}
             <div 
               className="relative flex-shrink-0"
               style={{
-                width: `${1100 * canvasScale * zoomMultiplier}px`,
-                height: `${850 * canvasScale * zoomMultiplier}px`,
+                width: `${canvasSize.width * canvasScale * zoomMultiplier}px`,
+                height: `${canvasSize.height * canvasScale * zoomMultiplier}px`,
               }}
             >
               
-              {/* TOP HORIZONTAL RULER (Shown only when showGuides is true) */}
               {!isPreviewMode && showGuides && (
                 <div 
                   className="absolute -top-6 left-0 right-0 h-5 bg-white border-b border-purple-200 flex items-center cursor-ns-resize z-20 shadow-sm"
@@ -2000,7 +2590,6 @@ export default function CertificateGenerator() {
                 </div>
               )}
 
-              {/* LEFT VERTICAL RULER (Shown only when showGuides is true) */}
               {!isPreviewMode && showGuides && (
                 <div 
                   className="absolute -left-6 top-0 bottom-0 w-5 bg-white border-r border-purple-200 flex flex-col items-center justify-center cursor-ew-resize z-20 shadow-sm"
@@ -2017,14 +2606,13 @@ export default function CertificateGenerator() {
                 </div>
               )}
 
-              {/* CANVAS */}
               <div 
                 ref={canvasRef}
                 onPointerDown={handleCanvasPointerDown}
                 className="absolute inset-0 shadow-2xl overflow-hidden cursor-crosshair rounded-sm"
                 style={{
-                  width: '1100px',
-                  height: '850px',
+                  width: `${canvasSize.width}px`,
+                  height: `${canvasSize.height}px`,
                   transform: `scale(${canvasScale * zoomMultiplier})`,
                   transformOrigin: 'top left',
                   ...(bgType !== 'custom' ? PRESET_BACKGROUNDS[bgType].style : { backgroundColor: '#ffffff' })
@@ -2047,7 +2635,6 @@ export default function CertificateGenerator() {
                   />
                 )}
 
-                {/* Render Signature Images above signature fields automatically if uploaded */}
                 {activeSignatories.map((sig) => {
                   if (!sig.signatureImg) return null;
                   const nameEl = activeElements.find(el => el.sigId === sig.id && el.sigField === 'name');
@@ -2086,7 +2673,7 @@ export default function CertificateGenerator() {
                         left: `${el.x}%`,
                         top: `${el.y}%`,
                         transform: el.type === 'logo' || el.align === 'center' ? 'translateX(-50%)' : 'none',
-                        width: el.type === 'text' && el.maxWidth ? `${el.maxWidth}%` : (el.type === 'line' || el.type === 'logo') ? `${el.width || 100}px` : 'auto',
+                        width: el.type === 'text' && el.maxWidth ? `${el.maxWidth}%` : (el.type === 'line' || el.type === 'logo') ? `${el.width || 100}px` : el.type === 'qrcode' ? `${el.size || 90}px` : 'auto',
                         zIndex: isSelected ? 30 : 10
                       }}
                     >
@@ -2141,14 +2728,32 @@ export default function CertificateGenerator() {
                           alt="Institution Logo" 
                           className="w-full h-auto object-contain pointer-events-none select-none"
                         />
+                      ) : el.type === 'qrcode' ? (
+                        (() => {
+                          const qrText = getElementText(el) || el.data || 'https://batchcert.verify';
+                          const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrText)}`;
+                          return (
+                            <div 
+                              className="bg-white p-1.5 rounded shadow-md flex items-center justify-center border border-purple-100"
+                              style={{ width: `${el.size || 90}px`, height: `${el.size || 90}px` }}
+                            >
+                              <img 
+                                src={qrApiUrl} 
+                                alt="QR Code" 
+                                crossOrigin="anonymous"
+                                className="w-full h-full object-contain pointer-events-none select-none"
+                              />
+                            </div>
+                          );
+                        })()
                       ) : null}
 
-                      {isSelected && !isPreviewMode && (
+                      {isSelected && !isPreviewMode && selectedIds.length === 1 && (
                         <div 
                           onPointerDown={(e) => {
                             e.stopPropagation();
                             setIsResizing(true);
-                            resizeStartRef.current = { startX: e.clientX, startWidth: el.maxWidth || 50, startElementWidth: el.width || 100 };
+                            resizeStartRef.current = { startX: e.clientX, startWidth: el.maxWidth || 50, startElementWidth: el.width || el.size || 100 };
                           }}
                           className="absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-8 bg-purple-600 rounded-sm cursor-ew-resize z-40 shadow hover:bg-purple-500"
                           title="Drag to resize width"
@@ -2158,7 +2763,6 @@ export default function CertificateGenerator() {
                   );
                 })}
 
-                {/* MARQUEE SELECTION BOX VISUAL OVERLAY */}
                 {marquee && !isPreviewMode && (
                   <div 
                     className="absolute border border-purple-500 bg-purple-500/20 pointer-events-none z-40"
@@ -2172,15 +2776,14 @@ export default function CertificateGenerator() {
                 )}
               </div>
 
-              {/* GUIDE LINES OVERLAY (Shown only when showGuides is true) */}
               {!isPreviewMode && showGuides && (
                 <div 
                   className="absolute inset-0 pointer-events-none overflow-hidden"
                   style={{
                     transform: `scale(${canvasScale * zoomMultiplier})`,
                     transformOrigin: 'top left',
-                    width: '1100px',
-                    height: '850px',
+                    width: `${canvasSize.width}px`,
+                    height: `${canvasSize.height}px`,
                     zIndex: 50
                   }}
                 >
@@ -2232,7 +2835,6 @@ export default function CertificateGenerator() {
 
       </div>
 
-      {/* FOOTER */}
       <div className="h-8 bg-purple-50 border-t border-purple-200 flex items-center justify-center px-4 text-xs font-medium text-purple-900 z-30 shadow-inner">
         Created by: IndiannoGibbs August 2026
       </div>
