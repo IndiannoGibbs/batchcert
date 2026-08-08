@@ -73,6 +73,24 @@ const PRESET_BACKGROUNDS = {
       outline: '2px dashed #c084fc',
       outlineOffset: '-14px'
     }
+  },
+  modernMinimal: {
+    name: 'Modern Minimal',
+    style: {
+      backgroundColor: '#fafafa',
+      border: '1px solid #e4e4e7',
+      outline: '4px solid #f4f4f5',
+      outlineOffset: '-8px'
+    }
+  },
+  darkMode: {
+    name: 'Midnight Dark Mode',
+    style: {
+      backgroundColor: '#09090b',
+      border: '12px solid #27272a',
+      outline: '2px solid #d4d4d8',
+      outlineOffset: '-16px'
+    }
   }
 };
 
