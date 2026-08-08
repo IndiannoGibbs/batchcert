@@ -6,7 +6,7 @@ import {
   ZoomIn, ZoomOut, RotateCcw, CheckSquare, Undo2, SlidersHorizontal,
   Bold, Italic, Underline, FilePlus, FileCode, Award, PenTool,
   Layers, Eye, EyeOff, ArrowUp, ArrowDown, Check, X, Search, Maximize2, Minimize2, Grid,
-  Maximize, Info, Tag, FileType, QrCode, HelpCircle
+  Maximize, Info, Tag, FileType, QrCode, HelpCircle, Sparkles, ArrowRight, Coffee
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -105,6 +105,9 @@ const deduplicateElements = (els) => {
 };
 
 export default function CertificateGenerator() {
+  // Navigation state for Landing Page vs Editor
+  const [isEditorLaunched, setIsEditorLaunched] = useState(false);
+
   const [activeTab, setActiveTab] = useState('data');
   const [bgType, setBgType] = useState('purpleGold');
   const [customBg, setCustomBg] = useState(null);
@@ -1360,6 +1363,174 @@ export default function CertificateGenerator() {
   const totalSidebarPages = Math.ceil(filteredSidebarAwardees.length / itemsPerPage);
   const paginatedSidebarAwardees = filteredSidebarAwardees.slice(sidebarPage * itemsPerPage, (sidebarPage + 1) * itemsPerPage);
 
+  // ==========================================
+  // LANDING PAGE VIEW (Before Editor Launch)
+  // ==========================================
+  if (!isEditorLaunched) {
+    return (
+      <div className="min-h-screen bg-white text-zinc-900 font-sans selection:bg-purple-200 selection:text-purple-950">
+        
+        {/* LANDING PAGE NAVBAR */}
+        <nav className="h-16 border-b border-purple-100 px-6 flex items-center justify-between sticky top-0 bg-white/90 backdrop-blur z-40">
+          <div className="flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 100" className="h-8 w-auto">
+              <defs>
+                <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#9333ea" />
+                  <stop offset="100%" stopColor="#581c87" />
+                </linearGradient>
+              </defs>
+              <g transform="translate(10, 15) scale(0.75)">
+                <rect x="12" y="12" width="64" height="64" rx="8" fill="#f3e8ff" opacity="0.6" />
+                <rect x="4" y="4" width="64" height="64" rx="8" fill="url(#purpleGrad)" />
+                <line x1="16" y1="20" x2="44" y2="20" stroke="#ffffff" strokeWidth="4" strokeLinecap="round" />
+                <line x1="16" y1="32" x2="56" y2="32" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" opacity="0.8" />
+                <circle cx="50" cy="50" r="14" fill="#ffffff" />
+                <path d="M44 50 L48 54 L57 44" fill="none" stroke="#581c87" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+              </g>
+              <text x="80" y="58" fontFamily="'Inter', sans-serif" fontSize="28" fontWeight="800" fill="#581c87">
+                Batch<tspan fontWeight="400" fill="#9333ea">Cert</tspan>
+              </text>
+            </svg>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <a href="https://ko-fi.com/indiannogibbs" target="_blank" rel="noopener noreferrer" className="hidden md:flex items-center gap-1.5 text-xs font-semibold text-zinc-600 hover:text-purple-700 transition">
+              <Coffee size={14} className="text-[#29abe0]" /> Support
+            </a>
+            <button 
+              onClick={() => setIsEditorLaunched(true)}
+              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5"
+            >
+              Launch Editor <ArrowRight size={14} />
+            </button>
+          </div>
+        </nav>
+
+        {/* HERO SECTION */}
+        <section className="px-6 py-20 max-w-6xl mx-auto text-center space-y-6">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-50 border border-purple-200 text-purple-900 text-xs font-bold">
+            <Sparkles size={13} className="text-purple-600" /> Fast, Secure & Browser-Based Bulk Generation
+          </div>
+          
+          <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight text-purple-950 leading-tight">
+            Generate 500+ Custom Certificates <br className="hidden md:block" />
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-700 to-purple-500">In Seconds</span>
+          </h1>
+
+          <p className="max-w-2xl mx-auto text-zinc-600 text-sm md:text-base leading-relaxed">
+            The ultimate batch certificate creator for educators, event organizers, and HR professionals. Import CSV data, map dynamic tags, and export high-resolution PDFs instantly.
+          </p>
+
+          <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-3">
+            <button 
+              onClick={() => setIsEditorLaunched(true)}
+              className="w-full sm:w-auto px-8 py-3.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-sm rounded-2xl shadow-xl shadow-purple-200 transition flex items-center justify-center gap-2"
+            >
+              Start Creating For Free <ArrowRight size={16} />
+            </button>
+            <a 
+              href="#features"
+              className="w-full sm:w-auto px-6 py-3.5 bg-purple-50 hover:bg-purple-100 text-purple-950 font-bold text-sm rounded-2xl border border-purple-200 transition text-center"
+            >
+              Explore Features
+            </a>
+          </div>
+        </section>
+
+        {/* FEATURES GRID */}
+        <section id="features" className="py-16 bg-purple-50/40 border-y border-purple-100 px-6">
+          <div className="max-w-6xl mx-auto space-y-12">
+            <div className="text-center space-y-2">
+              <h2 className="text-2xl md:text-3xl font-extrabold text-purple-950">Engineered For Scale & Simplicity</h2>
+              <p className="text-zinc-600 text-xs md:text-sm">Everything you need to produce professional certificates without breaking a sweat.</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="bg-white p-6 rounded-2xl border border-purple-100 shadow-sm space-y-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-purple-700">
+                  <Layers size={20} />
+                </div>
+                <h3 className="font-bold text-purple-950 text-sm">Chunked Async Batching</h3>
+                <p className="text-zinc-600 text-xs leading-relaxed">Process 500+ certificates smoothly with yield loops and explicit memory cleanup preventing browser crashes.</p>
+              </div>
+
+              <div className="bg-white p-6 rounded-2xl border border-purple-100 shadow-sm space-y-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-purple-700">
+                  <QrCode size={20} />
+                </div>
+                <h3 className="font-bold text-purple-950 text-sm">Dynamic QR Verification</h3>
+                <p className="text-zinc-600 text-xs leading-relaxed">Bind unique CSV tags to instantly generate anti-counterfeit verification links for every awardee.</p>
+              </div>
+
+              <div className="bg-white p-6 rounded-2xl border border-purple-100 shadow-sm space-y-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-purple-700">
+                  <Download size={20} />
+                </div>
+                <h3 className="font-bold text-purple-950 text-sm">HD Print Resolution</h3>
+                <p className="text-zinc-600 text-xs leading-relaxed">Export quality toggles (1x draft, 2x HD, 3x Ultra-HD) tailored for professional printing or digital sharing.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* HOW IT WORKS */}
+        <section className="py-20 px-6 max-w-5xl mx-auto space-y-12">
+          <div className="text-center space-y-2">
+            <h2 className="text-2xl md:text-3xl font-extrabold text-purple-950">How BatchCert Works</h2>
+            <p className="text-zinc-600 text-xs md:text-sm">Create and export your entire batch in three straightforward steps.</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div className="space-y-3 text-center">
+              <div className="w-12 h-12 rounded-full bg-purple-600 text-white font-bold text-base flex items-center justify-center mx-auto shadow-lg shadow-purple-200">1</div>
+              <h3 className="font-bold text-purple-950 text-sm">Import CSV Data</h3>
+              <p className="text-zinc-600 text-xs leading-relaxed">Upload your spreadsheet containing awardee names, designations, and custom tracking IDs.</p>
+            </div>
+
+            <div className="space-y-3 text-center">
+              <div className="w-12 h-12 rounded-full bg-purple-600 text-white font-bold text-base flex items-center justify-center mx-auto shadow-lg shadow-purple-200">2</div>
+              <h3 className="font-bold text-purple-950 text-sm">Design & Position</h3>
+              <p className="text-zinc-600 text-xs leading-relaxed">Customize fonts, background styles, logos, and layout dimensions right on the visual canvas.</p>
+            </div>
+
+            <div className="space-y-3 text-center">
+              <div className="w-12 h-12 rounded-full bg-purple-600 text-white font-bold text-base flex items-center justify-center mx-auto shadow-lg shadow-purple-200">3</div>
+              <h3 className="font-bold text-purple-950 text-sm">Export ZIP Archive</h3>
+              <p className="text-zinc-600 text-xs leading-relaxed">Download a structured ZIP folder packed with individual PDFs or high-resolution PNGs.</p>
+            </div>
+          </div>
+        </section>
+
+        {/* CTA BANNER */}
+        <section className="bg-gradient-to-r from-purple-900 to-purple-950 text-white py-16 px-6 text-center space-y-6">
+          <h2 className="text-2xl md:text-4xl font-extrabold">Ready to streamline your certificate workflow?</h2>
+          <p className="text-purple-200 text-xs md:text-sm max-w-xl mx-auto">Join educators and professionals saving hours of manual formatting work.</p>
+          <button 
+            onClick={() => setIsEditorLaunched(true)}
+            className="px-8 py-3.5 bg-white text-purple-950 hover:bg-purple-50 font-bold text-sm rounded-2xl shadow-xl transition"
+          >
+            Launch BatchCert Editor Now
+          </button>
+        </section>
+
+        {/* FOOTER */}
+        <footer className="border-t border-purple-100 py-8 px-6 text-center text-xs text-zinc-500 space-y-2">
+          <p>© 2026 BatchCert. Created by IndiannoGibbs.</p>
+          <div className="flex items-center justify-center gap-4">
+            <a href="https://ko-fi.com/indiannogibbs" target="_blank" rel="noopener noreferrer" className="text-purple-700 hover:underline font-semibold flex items-center gap-1">
+              <Coffee size={12} className="text-[#29abe0]" /> Support on Ko-fi
+            </a>
+          </div>
+        </footer>
+
+      </div>
+    );
+  }
+
+  // ==========================================
+  // CERTIFICATE GENERATOR EDITOR WORKSPACE
+  // ==========================================
   return (
     <div className="flex flex-col h-screen bg-white text-zinc-900 font-sans overflow-hidden select-none">
       
@@ -1670,6 +1841,13 @@ export default function CertificateGenerator() {
       {!isPreviewMode && (
         <div className="h-12 bg-white border-b border-purple-200 flex items-center justify-between px-4 z-30 shadow-sm">
           <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setIsEditorLaunched(false)}
+              className="text-xs font-extrabold text-purple-900 tracking-wider hover:underline flex items-center gap-1"
+            >
+              ← Exit to Home
+            </button>
+
             <span className="text-xs font-extrabold text-purple-900 tracking-wider flex items-center gap-1.5 uppercase">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 100" width="100%" height="100%" className="h-9 w-auto flex-shrink-0">
                 <defs>
