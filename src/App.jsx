@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
+import {
   Upload, Download, Plus, Trash2, ChevronLeft, ChevronRight, 
   Move, Type, Image as ImageIcon, Layout, Users, FileText, 
   AlignLeft, AlignCenter, AlignRight, Palette, Scaling, Sliders, Minus, Save, FolderOpen,
@@ -11,6 +11,14 @@ import {
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import JSZip from 'jszip';
+import LandingPage from './components/LandingPage';
+import LoaderOverlay from './components/LoaderOverlay';
+import EditorTopBar from './components/EditorTopBar';
+import KeyboardShortcutModal from './components/KeyboardShortcutModal';
+import CSVInstructionsModal from './components/CSVInstructionsModal';
+import QRInstructionsModal from './components/QRInstructionsModal';
+import ExportModal from './components/ExportModal';
+import AwardeeDropdown from './components/AwardeeDropdown';
 
 // --- Curated Google Fonts Library ---
 const GOOGLE_FONTS = [
@@ -107,6 +115,28 @@ const deduplicateElements = (els) => {
 export default function CertificateGenerator() {
   // Navigation state for Landing Page vs Editor
   const [isEditorLaunched, setIsEditorLaunched] = useState(false);
+  const [isLaunchingEditor, setIsLaunchingEditor] = useState(false);
+  const [isReturningHome, setIsReturningHome] = useState(false);
+
+  const handleLaunchEditor = () => {
+    if (isLaunchingEditor || isReturningHome) return;
+    setIsLaunchingEditor(true);
+    setIsReturningHome(false);
+    window.setTimeout(() => {
+      setIsEditorLaunched(true);
+      setIsLaunchingEditor(false);
+    }, 850);
+  };
+
+  const handleExitToHome = () => {
+    if (isReturningHome || isLaunchingEditor) return;
+    setIsReturningHome(true);
+    setIsLaunchingEditor(false);
+    window.setTimeout(() => {
+      setIsEditorLaunched(false);
+      setIsReturningHome(false);
+    }, 850);
+  };
 
   const [activeTab, setActiveTab] = useState('data');
   const [bgType, setBgType] = useState('purpleGold');
@@ -197,6 +227,7 @@ export default function CertificateGenerator() {
   const currentAwardee = awardees[currentAwardeeIdx] || {};
   const activeElements = deduplicateElements((currentAwardee.hasCustomLayout && currentAwardee.customElements) ? currentAwardee.customElements : elements);
   const activeSignatories = (currentAwardee.hasCustomLayout && currentAwardee.customSignatories) ? currentAwardee.customSignatories : signatories;
+
 
   // Load Google Fonts into document head dynamically on mount
   useEffect(() => {
@@ -685,8 +716,98 @@ export default function CertificateGenerator() {
   // Group Deletion / Single Deletion support
   const deleteSelectedElements = () => {
     if (selectedIds.length === 0) return;
-    const updated = activeElements.filter(el => !selectedIds.includes(el.id));
-    pushHistory(updated);
+
+    const deletedElements = activeElements.filter(el => selectedIds.includes(el.id));
+    const updatedElements = activeElements.filter(el => !selectedIds.includes(el.id));
+
+    setEditingElementId(null);
+
+    const builtInAwardeeKeys = new Set(['orgName', 'orgSubtext', 'certificateTitle', 'bodyTemplate', 'dateLine', 'awardeeName', 'awardeePosition']);
+    const globalDataReset = {};
+    let shouldClearAwardeeName = false;
+    let shouldClearAwardeePosition = false;
+    const customCsvClears = new Set();
+    const customSigClears = {};
+    const globalSigClears = {};
+
+    deletedElements.forEach(el => {
+      if (el.key) {
+        if (el.key === 'awardeeName') {
+          shouldClearAwardeeName = true;
+        } else if (el.key === 'awardeePosition') {
+          shouldClearAwardeePosition = true;
+        } else if (el.key in globalData) {
+          globalDataReset[el.key] = '';
+        } else if (!builtInAwardeeKeys.has(el.key)) {
+          // Clear custom awardee CSV data entries when the matching element is deleted
+          customCsvClears.add(el.key);
+        }
+      }
+
+      if (el.sigId && el.sigField) {
+        if (currentAwardee.hasCustomLayout) {
+          customSigClears[el.sigId] = customSigClears[el.sigId] || new Set();
+          customSigClears[el.sigId].add(el.sigField);
+        } else {
+          globalSigClears[el.sigId] = globalSigClears[el.sigId] || new Set();
+          globalSigClears[el.sigId].add(el.sigField);
+        }
+      }
+    });
+
+    if (Object.keys(globalDataReset).length > 0) {
+      setGlobalData(prev => ({ ...prev, ...globalDataReset }));
+    }
+
+    if (shouldClearAwardeeName || shouldClearAwardeePosition || customCsvClears.size > 0) {
+      setAwardees(prev => prev.map((a, idx) => {
+        if (idx !== currentAwardeeIdx) return a;
+        const updatedCsv = { ...(a.csvData || {}) };
+        const updatedAwardee = { ...a };
+
+        if (shouldClearAwardeeName) {
+          updatedAwardee.name = '';
+          updatedCsv.Name = '';
+        }
+        if (shouldClearAwardeePosition) {
+          updatedAwardee.position = '';
+          updatedCsv.Position = '';
+        }
+
+        customCsvClears.forEach(csvKey => {
+          if (csvKey in updatedCsv) {
+            updatedCsv[csvKey] = '';
+          }
+        });
+
+        return { ...updatedAwardee, csvData: updatedCsv };
+      }));
+    }
+
+    if (currentAwardee.hasCustomLayout && Object.keys(customSigClears).length > 0) {
+      setAwardees(prev => prev.map((a, idx) => {
+        if (idx !== currentAwardeeIdx) return a;
+        const updatedSigs = (a.customSignatories || []).map(sig => {
+          if (!customSigClears[sig.id]) return sig;
+          const fields = Array.from(customSigClears[sig.id]);
+          const nextSig = { ...sig };
+          fields.forEach(field => { nextSig[field] = ''; });
+          return nextSig;
+        });
+        return { ...a, customSignatories: updatedSigs };
+      }));
+    }
+
+    if (!currentAwardee.hasCustomLayout && Object.keys(globalSigClears).length > 0) {
+      setSignatories(prev => prev.map(sig => {
+        if (!globalSigClears[sig.id]) return sig;
+        const nextSig = { ...sig };
+        Array.from(globalSigClears[sig.id]).forEach(field => { nextSig[field] = ''; });
+        return nextSig;
+      }));
+    }
+
+    pushHistory(updatedElements);
     setSelectedIds([]);
   };
 
@@ -884,6 +1005,30 @@ export default function CertificateGenerator() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedIds, historyIndex, history, currentAwardeeIdx, currentAwardee.hasCustomLayout, activeElements, projectName, editingElementId]);
 
+  const getRenderedText = (element, awardee = {}) => {
+    const rawText = typeof element?.text === 'string' ? element.text : '';
+    if (typeof rawText !== 'string' || rawText.indexOf('{{') === -1) {
+      return rawText || '';
+    }
+
+    return rawText.replace(/\{\{\s*([^}]+)\s*\}\}/g, (match, keyName) => {
+      const trimmedKey = keyName.trim();
+      if (!trimmedKey) return match;
+      if (trimmedKey.toLowerCase() === 'duties') return globalData.eventDuties || '';
+      if (trimmedKey.toLowerCase() === 'name') return awardee.name || '';
+      if (trimmedKey.toLowerCase() === 'position') return awardee.position || '';
+
+      if (awardee.csvData) {
+        if (awardee.csvData[trimmedKey] !== undefined) return awardee.csvData[trimmedKey];
+        const matchedKey = Object.keys(awardee.csvData).find(k => k.toLowerCase() === trimmedKey.toLowerCase());
+        if (matchedKey) return awardee.csvData[matchedKey] || '';
+      }
+
+      if (awardee[trimmedKey] !== undefined) return awardee[trimmedKey];
+      return match;
+    });
+  };
+
   const getElementText = (el) => {
     let rawText = '';
     if (el.sigId) {
@@ -912,35 +1057,8 @@ export default function CertificateGenerator() {
       }
     }
 
-    // Dynamic Dynamic {{Variable}} Placeholder Replacement
     const currentAwardeeObj = awardees[currentAwardeeIdx] || {};
-    if (typeof rawText === 'string' && rawText.includes('{{')) {
-      return rawText.replace(/\{\{\s*([^}]+)\s*\}\}/g, (match, keyName) => {
-        const trimmedKey = keyName.trim();
-        if (trimmedKey === 'duties') return globalData.eventDuties || '';
-        if (trimmedKey.toLowerCase() === 'name') return currentAwardeeObj.name || '';
-        if (trimmedKey.toLowerCase() === 'position') return currentAwardeeObj.position || '';
-
-        if (currentAwardeeObj.csvData && currentAwardeeObj.csvData[trimmedKey] !== undefined) {
-          return currentAwardeeObj.csvData[trimmedKey];
-        }
-
-        if (currentAwardeeObj.csvData) {
-          const matchedKey = Object.keys(currentAwardeeObj.csvData).find(k => k.toLowerCase() === trimmedKey.toLowerCase());
-          if (matchedKey && currentAwardeeObj.csvData[matchedKey] !== undefined) {
-            return currentAwardeeObj.csvData[matchedKey];
-          }
-        }
-
-        if (currentAwardeeObj[trimmedKey] !== undefined) {
-          return currentAwardeeObj[trimmedKey];
-        }
-
-        return match;
-      });
-    }
-
-    return rawText;
+    return getRenderedText({ text: typeof rawText === 'string' ? rawText : '' }, currentAwardeeObj);
   };
 
   const saveInlineEdit = (el, val) => {
@@ -1241,7 +1359,14 @@ export default function CertificateGenerator() {
       };
 
       const headers = parseRow(lines[0]);
+      const normalizeHeader = (value) => value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+      const normalizedHeaders = headers.map(normalizeHeader);
       setCsvHeaders(headers);
+
+      const findHeaderIndex = (variants) => {
+        const normalizedVariants = variants.map(normalizeHeader);
+        return normalizedHeaders.findIndex(h => normalizedVariants.includes(h));
+      };
 
       const parsed = lines.slice(1).map((line, idx) => {
         const parts = parseRow(line);
@@ -1250,26 +1375,122 @@ export default function CertificateGenerator() {
           rowData[h] = parts[hIdx] || '';
         });
 
-        const nameIdx = headers.findIndex(h => h.toLowerCase() === 'name');
-        const posIdx = headers.findIndex(h => h.toLowerCase() === 'position' || h.toLowerCase() === 'title');
+        const nameIdx = findHeaderIndex(['Name', 'name', 'Awardee Name', 'awardee name', 'awardee_name']);
+        const posIdx = findHeaderIndex(['Position', 'position', 'Title', 'title', 'Awardee Position', 'awardee position', 'awardee_position']);
 
         const nameVal = nameIdx !== -1 ? parts[nameIdx] : (parts[0] || '');
         const posVal = posIdx !== -1 ? parts[posIdx] : (parts[1] || '');
 
-        return { 
-          id: String(Date.now() + idx), 
-          name: nameVal, 
+        return {
+          id: String(Date.now() + idx),
+          name: nameVal,
           position: posVal,
           csvData: rowData,
           hasCustomLayout: false,
           customElements: null,
           customSignatories: null
         };
-      }).filter(item => item.name !== '' || Object.values(item.csvData || {}).some(v => v !== ''));
+      }).filter(item => item.name !== '' || item.position !== '' || Object.values(item.csvData || {}).some(v => v !== ''));
 
       if (parsed.length > 0) {
+        const awardeeNameMissing = !activeElements.some(el => el.key === 'awardeeName');
+        const awardeePositionMissing = !activeElements.some(el => el.key === 'awardeePosition');
+        const existingDynamicHeaders = new Set(activeElements.reduce((acc, el) => {
+          if (typeof el.text !== 'string') return acc;
+          const matches = Array.from(el.text.matchAll(/\{\{\s*([^}]+)\s*\}\}/g));
+          matches.forEach(match => {
+            if (match[1]) acc.add(match[1].trim().toLowerCase());
+          });
+          return acc;
+        }, []));
+
+        const builtInHeaderVariants = new Set([
+          'name', 'awardee name', 'awardee_name',
+          'position', 'awardee position', 'awardee_position',
+          'title'
+        ]);
+
+        const customHeaders = headers.filter((header) => {
+          const normalized = header.trim().toLowerCase();
+          return normalized && !builtInHeaderVariants.has(normalized) && !existingDynamicHeaders.has(normalized);
+        });
+
+        const customElements = customHeaders.map((header, idx) => ({
+          id: `field_csv_${Date.now()}_${idx}`,
+          type: 'text',
+          text: `{{${header}}}`,
+          label: header,
+          x: 50,
+          y: 58 + idx * 8,
+          font: 'Inter',
+          fontSize: 20,
+          color: '#1f2937',
+          bold: false,
+          italic: false,
+          underline: false,
+          align: 'center',
+          maxWidth: 80,
+          visible: true
+        }));
+
+        const placeholderElements = [];
+        if (awardeeNameMissing) {
+          placeholderElements.push({
+            id: `field_awardeeName_${Date.now()}`,
+            type: 'text',
+            key: 'awardeeName',
+            label: 'Awardee Name',
+            text: '',
+            x: 50,
+            y: 30,
+            font: 'Cinzel',
+            fontSize: 32,
+            color: '#1f2937',
+            bold: true,
+            italic: false,
+            underline: false,
+            align: 'center',
+            maxWidth: 80,
+            visible: true
+          });
+        }
+
+        if (awardeePositionMissing) {
+          placeholderElements.push({
+            id: `field_awardeePosition_${Date.now()}`,
+            type: 'text',
+            key: 'awardeePosition',
+            label: 'Awardee Position',
+            text: '',
+            x: 50,
+            y: 40,
+            font: 'Montserrat',
+            fontSize: 20,
+            color: '#1f2937',
+            bold: true,
+            italic: false,
+            underline: false,
+            align: 'center',
+            maxWidth: 80,
+            visible: true
+          });
+        }
+
         setAwardees(parsed);
         setCurrentAwardeeIdx(0);
+
+        if (placeholderElements.length || customElements.length) {
+          const allNewElements = [...placeholderElements, ...customElements];
+          if (currentAwardee.hasCustomLayout) {
+            setAwardees(prev => prev.map((a, idx) => {
+              if (idx !== currentAwardeeIdx) return a;
+              return { ...a, customElements: [...(a.customElements || []), ...allNewElements] };
+            }));
+          } else {
+            pushHistory([...activeElements, ...allNewElements]);
+          }
+        }
+
         alert(`Successfully imported ${parsed.length} awardees with ${headers.length} dynamic column fields (${headers.join(', ')})!`);
       } else {
         alert('No valid rows found in CSV.');
@@ -1368,163 +1589,14 @@ export default function CertificateGenerator() {
   // ==========================================
   if (!isEditorLaunched) {
     return (
-      <div className="min-h-screen bg-white text-zinc-900 font-sans selection:bg-purple-200 selection:text-purple-950">
-        
-        {/* LANDING PAGE NAVBAR */}
-        <nav className="h-16 border-b border-purple-100 px-6 flex items-center justify-between sticky top-0 bg-white/90 backdrop-blur z-40">
-          <div className="flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 100" className="h-8 w-auto">
-              <defs>
-                <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#9333ea" />
-                  <stop offset="100%" stopColor="#581c87" />
-                </linearGradient>
-              </defs>
-              <g transform="translate(10, 15) scale(0.75)">
-                <rect x="12" y="12" width="64" height="64" rx="8" fill="#f3e8ff" opacity="0.6" />
-                <rect x="4" y="4" width="64" height="64" rx="8" fill="url(#purpleGrad)" />
-                <line x1="16" y1="20" x2="44" y2="20" stroke="#ffffff" strokeWidth="4" strokeLinecap="round" />
-                <line x1="16" y1="32" x2="56" y2="32" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" opacity="0.8" />
-                <circle cx="50" cy="50" r="14" fill="#ffffff" />
-                <path d="M44 50 L48 54 L57 44" fill="none" stroke="#581c87" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-              </g>
-              <text x="80" y="58" fontFamily="'Inter', sans-serif" fontSize="28" fontWeight="800" fill="#581c87">
-                Batch<tspan fontWeight="400" fill="#9333ea">Cert</tspan>
-              </text>
-            </svg>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <a href="https://ko-fi.com/indiannogibbs" target="_blank" rel="noopener noreferrer" className="hidden md:flex items-center gap-1.5 text-xs font-semibold text-zinc-600 hover:text-purple-700 transition">
-              <Coffee size={14} className="text-[#29abe0]" /> Support
-            </a>
-            <button 
-              onClick={() => setIsEditorLaunched(true)}
-              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5"
-            >
-              Launch Editor <ArrowRight size={14} />
-            </button>
-          </div>
-        </nav>
-
-        {/* HERO SECTION */}
-        <section className="px-6 py-20 max-w-6xl mx-auto text-center space-y-6">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-50 border border-purple-200 text-purple-900 text-xs font-bold">
-            <Sparkles size={13} className="text-purple-600" /> Fast, Secure & Browser-Based Bulk Generation
-          </div>
-          
-          <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight text-purple-950 leading-tight">
-            Generate 500+ Custom Certificates <br className="hidden md:block" />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-700 to-purple-500">In Seconds</span>
-          </h1>
-
-          <p className="max-w-2xl mx-auto text-zinc-600 text-sm md:text-base leading-relaxed">
-            The ultimate batch certificate creator for educators, event organizers, and HR professionals. Import CSV data, map dynamic tags, and export high-resolution PDFs instantly.
-          </p>
-
-          <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-3">
-            <button 
-              onClick={() => setIsEditorLaunched(true)}
-              className="w-full sm:w-auto px-8 py-3.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-sm rounded-2xl shadow-xl shadow-purple-200 transition flex items-center justify-center gap-2"
-            >
-              Start Creating For Free <ArrowRight size={16} />
-            </button>
-            <a 
-              href="#features"
-              className="w-full sm:w-auto px-6 py-3.5 bg-purple-50 hover:bg-purple-100 text-purple-950 font-bold text-sm rounded-2xl border border-purple-200 transition text-center"
-            >
-              Explore Features
-            </a>
-          </div>
-        </section>
-
-        {/* FEATURES GRID */}
-        <section id="features" className="py-16 bg-purple-50/40 border-y border-purple-100 px-6">
-          <div className="max-w-6xl mx-auto space-y-12">
-            <div className="text-center space-y-2">
-              <h2 className="text-2xl md:text-3xl font-extrabold text-purple-950">Engineered For Scale & Simplicity</h2>
-              <p className="text-zinc-600 text-xs md:text-sm">Everything you need to produce professional certificates without breaking a sweat.</p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-white p-6 rounded-2xl border border-purple-100 shadow-sm space-y-3">
-                <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-purple-700">
-                  <Layers size={20} />
-                </div>
-                <h3 className="font-bold text-purple-950 text-sm">Chunked Async Batching</h3>
-                <p className="text-zinc-600 text-xs leading-relaxed">Process 500+ certificates smoothly with yield loops and explicit memory cleanup preventing browser crashes.</p>
-              </div>
-
-              <div className="bg-white p-6 rounded-2xl border border-purple-100 shadow-sm space-y-3">
-                <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-purple-700">
-                  <QrCode size={20} />
-                </div>
-                <h3 className="font-bold text-purple-950 text-sm">Dynamic QR Verification</h3>
-                <p className="text-zinc-600 text-xs leading-relaxed">Bind unique CSV tags to instantly generate anti-counterfeit verification links for every awardee.</p>
-              </div>
-
-              <div className="bg-white p-6 rounded-2xl border border-purple-100 shadow-sm space-y-3">
-                <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-purple-700">
-                  <Download size={20} />
-                </div>
-                <h3 className="font-bold text-purple-950 text-sm">HD Print Resolution</h3>
-                <p className="text-zinc-600 text-xs leading-relaxed">Export quality toggles (1x draft, 2x HD, 3x Ultra-HD) tailored for professional printing or digital sharing.</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* HOW IT WORKS */}
-        <section className="py-20 px-6 max-w-5xl mx-auto space-y-12">
-          <div className="text-center space-y-2">
-            <h2 className="text-2xl md:text-3xl font-extrabold text-purple-950">How BatchCert Works</h2>
-            <p className="text-zinc-600 text-xs md:text-sm">Create and export your entire batch in three straightforward steps.</p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="space-y-3 text-center">
-              <div className="w-12 h-12 rounded-full bg-purple-600 text-white font-bold text-base flex items-center justify-center mx-auto shadow-lg shadow-purple-200">1</div>
-              <h3 className="font-bold text-purple-950 text-sm">Import CSV Data</h3>
-              <p className="text-zinc-600 text-xs leading-relaxed">Upload your spreadsheet containing awardee names, designations, and custom tracking IDs.</p>
-            </div>
-
-            <div className="space-y-3 text-center">
-              <div className="w-12 h-12 rounded-full bg-purple-600 text-white font-bold text-base flex items-center justify-center mx-auto shadow-lg shadow-purple-200">2</div>
-              <h3 className="font-bold text-purple-950 text-sm">Design & Position</h3>
-              <p className="text-zinc-600 text-xs leading-relaxed">Customize fonts, background styles, logos, and layout dimensions right on the visual canvas.</p>
-            </div>
-
-            <div className="space-y-3 text-center">
-              <div className="w-12 h-12 rounded-full bg-purple-600 text-white font-bold text-base flex items-center justify-center mx-auto shadow-lg shadow-purple-200">3</div>
-              <h3 className="font-bold text-purple-950 text-sm">Export ZIP Archive</h3>
-              <p className="text-zinc-600 text-xs leading-relaxed">Download a structured ZIP folder packed with individual PDFs or high-resolution PNGs.</p>
-            </div>
-          </div>
-        </section>
-
-        {/* CTA BANNER */}
-        <section className="bg-gradient-to-r from-purple-900 to-purple-950 text-white py-16 px-6 text-center space-y-6">
-          <h2 className="text-2xl md:text-4xl font-extrabold">Ready to streamline your certificate workflow?</h2>
-          <p className="text-purple-200 text-xs md:text-sm max-w-xl mx-auto">Join educators and professionals saving hours of manual formatting work.</p>
-          <button 
-            onClick={() => setIsEditorLaunched(true)}
-            className="px-8 py-3.5 bg-white text-purple-950 hover:bg-purple-50 font-bold text-sm rounded-2xl shadow-xl transition"
-          >
-            Launch BatchCert Editor Now
-          </button>
-        </section>
-
-        {/* FOOTER */}
-        <footer className="border-t border-purple-100 py-8 px-6 text-center text-xs text-zinc-500 space-y-2">
-          <p>© 2026 BatchCert. Created by IndiannoGibbs.</p>
-          <div className="flex items-center justify-center gap-4">
-            <a href="https://ko-fi.com/indiannogibbs" target="_blank" rel="noopener noreferrer" className="text-purple-700 hover:underline font-semibold flex items-center gap-1">
-              <Coffee size={12} className="text-[#29abe0]" /> Support on Ko-fi
-            </a>
-          </div>
-        </footer>
-
-      </div>
+      <>
+        <LandingPage onLaunchApp={handleLaunchEditor} />
+        <LoaderOverlay
+          visible={isLaunchingEditor}
+          title="Launching Editor"
+          description="Preparing your certificate workspace…"
+        />
+      </>
     );
   }
 
@@ -1532,389 +1604,69 @@ export default function CertificateGenerator() {
   // CERTIFICATE GENERATOR EDITOR WORKSPACE
   // ==========================================
   return (
-    <div className="flex flex-col h-screen bg-white text-zinc-900 font-sans overflow-hidden select-none">
+    <div className="relative flex flex-col h-screen bg-white text-zinc-900 font-sans overflow-hidden select-none">
+      <LoaderOverlay
+        visible={isReturningHome}
+        title="Returning Home"
+        description="Saving your workspace and opening the landing page…"
+      />
+      {(isLaunchingEditor || isReturningHome) && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/90 backdrop-blur-sm px-4">
+          <div className="flex flex-col items-center gap-6 rounded-[32px] border border-white/10 bg-slate-950/95 p-6 shadow-[0_40px_120px_rgba(15,23,42,0.55)] max-w-[380px] w-full">
+            <div className="relative w-40 h-56 rounded-[28px] border border-white/15 bg-slate-900/95 overflow-hidden shadow-[0_24px_64px_rgba(15,23,42,0.35)]">
+              <div className="absolute inset-x-5 top-5 h-11 rounded-2xl bg-slate-950/95 border border-white/10" />
+              <div className="absolute inset-x-5 bottom-5 top-20 rounded-[22px] overflow-hidden bg-slate-950/90 border border-white/10">
+                <div className="absolute inset-x-0 bottom-0 h-full bg-gradient-to-b from-fuchsia-400 via-violet-500 to-sky-400 translate-y-full animate-batchcert-file-fill" />
+              </div>
+              <div className="absolute inset-x-5 top-24 grid gap-2">
+                <div className="h-2 rounded-full bg-white/20 w-3/4" />
+                <div className="h-2 rounded-full bg-white/15 w-1/2" />
+                <div className="h-2 rounded-full bg-white/15 w-5/6" />
+              </div>
+              <div className="absolute inset-x-5 bottom-6 grid gap-2">
+                <div className="h-3 rounded-full bg-white/10" />
+                <div className="h-3 rounded-full bg-white/10 w-4/5" />
+                <div className="h-3 rounded-full bg-white/10 w-3/5" />
+              </div>
+            </div>
+            <div className="text-center text-white">
+              <p className="text-lg font-semibold">{isReturningHome ? 'Returning Home' : 'Launching Editor'}</p>
+              <p className="mt-2 text-sm text-slate-300">{isReturningHome ? 'Saving your workspace and opening the landing page…' : 'Preparing your certificate workspace…'}</p>
+            </div>
+          </div>
+        </div>
+      )}
       
-      {/* KEYBOARD SHORTCUTS CHEAT SHEET MODAL */}
-      {isKeyboardModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white border border-purple-200 rounded-2xl w-[520px] max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
-            <div className="p-4 border-b border-purple-100 flex justify-between items-center bg-purple-50/50">
-              <h3 className="text-xs font-bold text-purple-900 uppercase tracking-wider flex items-center gap-2">
-                <HelpCircle size={16} className="text-purple-600" /> Keyboard Shortcut Cheat Sheet
-              </h3>
-              <button 
-                onClick={() => setIsKeyboardModalOpen(false)}
-                className="text-zinc-400 hover:text-zinc-700 p-1 transition rounded-lg hover:bg-purple-100/50"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="p-5 overflow-y-auto space-y-3 text-xs text-zinc-700">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="bg-purple-50/50 p-2.5 rounded-xl border border-purple-100 flex justify-between items-center">
-                  <span className="font-semibold text-zinc-800">Undo</span>
-                  <kbd className="bg-white px-2 py-1 rounded border border-purple-200 font-mono text-[11px] text-purple-900 font-bold shadow-sm">Ctrl + Z</kbd>
-                </div>
-                <div className="bg-purple-50/50 p-2.5 rounded-xl border border-purple-100 flex justify-between items-center">
-                  <span className="font-semibold text-zinc-800">Redo</span>
-                  <kbd className="bg-white px-2 py-1 rounded border border-purple-200 font-mono text-[11px] text-purple-900 font-bold shadow-sm">Ctrl + Y / Shift+Z</kbd>
-                </div>
-                <div className="bg-purple-50/50 p-2.5 rounded-xl border border-purple-100 flex justify-between items-center">
-                  <span className="font-semibold text-zinc-800">Save Project</span>
-                  <kbd className="bg-white px-2 py-1 rounded border border-purple-200 font-mono text-[11px] text-purple-900 font-bold shadow-sm">Ctrl + S</kbd>
-                </div>
-                <div className="bg-purple-50/50 p-2.5 rounded-xl border border-purple-100 flex justify-between items-center">
-                  <span className="font-semibold text-zinc-800">Select All Elements</span>
-                  <kbd className="bg-white px-2 py-1 rounded border border-purple-200 font-mono text-[11px] text-purple-900 font-bold shadow-sm">Ctrl + A</kbd>
-                </div>
-                <div className="bg-purple-50/50 p-2.5 rounded-xl border border-purple-100 flex justify-between items-center">
-                  <span className="font-semibold text-zinc-800">Toggle Bold</span>
-                  <kbd className="bg-white px-2 py-1 rounded border border-purple-200 font-mono text-[11px] text-purple-900 font-bold shadow-sm">Ctrl + B</kbd>
-                </div>
-                <div className="bg-purple-50/50 p-2.5 rounded-xl border border-purple-100 flex justify-between items-center">
-                  <span className="font-semibold text-zinc-800">Toggle Italic</span>
-                  <kbd className="bg-white px-2 py-1 rounded border border-purple-200 font-mono text-[11px] text-purple-900 font-bold shadow-sm">Ctrl + I</kbd>
-                </div>
-                <div className="bg-purple-50/50 p-2.5 rounded-xl border border-purple-100 flex justify-between items-center">
-                  <span className="font-semibold text-zinc-800">Toggle Underline</span>
-                  <kbd className="bg-white px-2 py-1 rounded border border-purple-200 font-mono text-[11px] text-purple-900 font-bold shadow-sm">Ctrl + U</kbd>
-                </div>
-                <div className="bg-purple-50/50 p-2.5 rounded-xl border border-purple-100 flex justify-between items-center">
-                  <span className="font-semibold text-zinc-800">Delete Selected</span>
-                  <kbd className="bg-white px-2 py-1 rounded border border-purple-200 font-mono text-[11px] text-purple-900 font-bold shadow-sm">Delete / Backspace</kbd>
-                </div>
-              </div>
-
-              <div className="pt-2 border-t border-purple-100 space-y-1.5">
-                <span className="font-bold text-purple-950 block">Canvas Navigation & Nudging:</span>
-                <div className="bg-purple-50/30 p-3 rounded-xl border border-purple-100 space-y-1 text-[11px]">
-                  <p>• <strong className="text-zinc-800">Arrow Keys:</strong> Nudge selected element(s) by 0.5%</p>
-                  <p>• <strong className="text-zinc-800">Shift + Arrow Keys:</strong> Fast nudge selected element(s) by 2.0%</p>
-                  <p>• <strong className="text-zinc-800">Shift + Click:</strong> Multi-select individual canvas elements</p>
-                  <p>• <strong className="text-zinc-800">Click & Drag on Canvas:</strong> Multi-select box (marquee selection)</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-4 border-t border-purple-100 bg-purple-50/50 flex justify-end">
-              <button 
-                onClick={() => setIsKeyboardModalOpen(false)}
-                className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow transition"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* CSV INSTRUCTIONS MODAL */}
-      {isCsvModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white border border-purple-200 rounded-2xl w-[520px] max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
-            <div className="p-4 border-b border-purple-100 flex justify-between items-center bg-purple-50/50">
-              <h3 className="text-xs font-bold text-purple-900 uppercase tracking-wider flex items-center gap-2">
-                <Info size={16} className="text-purple-600" /> How to use Dynamic CSV Mapping
-              </h3>
-              <button 
-                onClick={() => setIsCsvModalOpen(false)}
-                className="text-zinc-400 hover:text-zinc-700 p-1 transition rounded-lg hover:bg-purple-100/50"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="p-5 overflow-y-auto space-y-4 text-xs text-zinc-700 leading-relaxed">
-              <ol className="list-decimal list-inside space-y-2.5 font-medium">
-                <li>
-                  <strong className="text-purple-950">Define Custom Headers:</strong> Set your column headers in row 1 of your CSV file (e.g., <code className="bg-purple-100 text-purple-900 px-1.5 py-0.5 rounded font-mono text-[11px]">Name, Position, IssueDate, CertificateID</code>).
-                </li>
-                <li>
-                  <strong className="text-purple-950">Import Your CSV File:</strong> Click the <span className="bg-purple-100 text-purple-900 px-1.5 py-0.5 rounded font-semibold">CSV Import</span> button under the Data tab to load your entire dataset.
-                </li>
-                <li>
-                  <strong className="text-purple-950">Bind Placeholders:</strong> Click any tag under <span className="bg-purple-100 text-purple-900 px-1.5 py-0.5 rounded font-semibold">Dynamic CSV Tags</span> or manually type <code className="bg-purple-100 text-purple-900 px-1.5 py-0.5 rounded font-mono text-[11px]">{`{{HeaderName}}`}</code> into any canvas text box or QR code data field.
-                </li>
-                <li>
-                  <strong className="text-purple-950">Automatic Generation:</strong> During batch export or canvas preview, each placeholder will dynamically load each individual awardee's unique record.
-                </li>
-              </ol>
-
-              <div className="pt-2 border-t border-purple-100">
-                <span className="text-[11px] font-bold text-purple-900 block mb-1.5">Example CSV Format:</span>
-                <div className="bg-zinc-900 text-purple-200 p-3 rounded-xl font-mono text-[11px] leading-relaxed shadow-inner border border-zinc-800">
-                  <span className="text-zinc-500">// Row 1 defines available variables</span><br />
-                  Name,Position,IssueDate,CertificateID<br />
-                  <span className="text-zinc-500">// Subsequent rows contain awardee data</span><br />
-                  Juan Dela Cruz,Keynote Speaker,August 2026,CERT-2026-001<br />
-                  Maria Clara,Participant,August 2026,CERT-2026-002
-                </div>
-              </div>
-            </div>
-
-            <div className="p-4 border-t border-purple-100 bg-purple-50/50 flex justify-end">
-              <button 
-                onClick={() => setIsCsvModalOpen(false)}
-                className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow transition"
-              >
-                Got it!
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* QR CODE INSTRUCTIONS MODAL */}
-      {isQrModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white border border-purple-200 rounded-2xl w-[520px] max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
-            <div className="p-4 border-b border-purple-100 flex justify-between items-center bg-purple-50/50">
-              <h3 className="text-xs font-bold text-purple-900 uppercase tracking-wider flex items-center gap-2">
-                <Info size={16} className="text-purple-600" /> How to use the QR Code Element
-              </h3>
-              <button 
-                onClick={() => setIsQrModalOpen(false)}
-                className="text-zinc-400 hover:text-zinc-700 p-1 transition rounded-lg hover:bg-purple-100/50"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="p-5 overflow-y-auto space-y-4 text-xs text-zinc-700 leading-relaxed">
-              <ol className="list-decimal list-inside space-y-2.5 font-medium">
-                <li>
-                  <strong className="text-purple-950">Add to Canvas:</strong> Click the <span className="bg-purple-100 text-purple-900 px-1.5 py-0.5 rounded font-semibold">Add QR Code Element</span> button under the Design tab.
-                </li>
-                <li>
-                  <strong className="text-purple-950">Set the Data/URL:</strong> Select the QR code on the canvas. In the top toolbar, enter your custom URL or verification link.
-                </li>
-                <li>
-                  <strong className="text-purple-950">Use Dynamic Tags:</strong> Make each QR code unique by using CSV tags (e.g., <code className="bg-purple-100 text-purple-900 px-1.5 py-0.5 rounded font-mono text-[11px]">{'https://verify.cert/{{Name}}'}</code>).
-                </li>
-                <li>
-                  <strong className="text-purple-950">Resize & Position:</strong> Drag the QR code to move it on the canvas, and use the side handle or toolbar size control to scale it.
-                </li>
-              </ol>
-
-              <div className="bg-purple-50/60 border border-purple-200 p-3.5 rounded-xl text-purple-950 text-[11px] font-medium leading-relaxed shadow-inner">
-                <span className="font-bold block mb-1">Automatic Generation:</span> QR codes will automatically render unique codes for every single awardee during batch PDF or PNG ZIP export!
-              </div>
-            </div>
-
-            <div className="p-4 border-t border-purple-100 bg-purple-50/50 flex justify-end">
-              <button 
-                onClick={() => setIsQrModalOpen(false)}
-                className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow transition"
-              >
-                Got it!
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* EXPORT MODAL WITH FORMAT & QUALITY CONTROLS */}
-      {isExportModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white border border-purple-200 rounded-xl w-[520px] max-h-[85vh] flex flex-col shadow-2xl">
-            <div className="p-4 border-b border-purple-100 flex justify-between items-center bg-purple-50/50 rounded-t-xl">
-              <h3 className="text-sm font-bold text-purple-900 uppercase tracking-wider flex items-center gap-2">
-                <Download size={16} className="text-purple-700" /> Export Batch Certificates (.zip Archive)
-              </h3>
-              <button 
-                onClick={() => setIsExportModalOpen(false)}
-                className="text-zinc-400 hover:text-zinc-700 p-1"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="p-5 flex-1 overflow-y-auto space-y-4">
-              <div>
-                <label className="text-xs font-semibold text-zinc-700 block mb-1.5 flex items-center gap-1.5">
-                  <FileType size={14} className="text-purple-600" /> Export File Format:
-                </label>
-                <select 
-                  value={exportFormat}
-                  onChange={(e) => setExportFormat(e.target.value)}
-                  className="w-full bg-purple-50/50 border border-purple-200 rounded-lg p-2.5 text-xs text-purple-950 font-bold focus:outline-none focus:border-purple-600 shadow-sm cursor-pointer"
-                >
-                  <option value="pdf">PDF Archive (.zip with individual PDFs)</option>
-                  <option value="png">High-Res PNG Archive (.zip with scale images)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-zinc-700 block mb-1.5 flex items-center gap-1.5">
-                  <Sliders size={14} className="text-purple-600" /> Export Quality & Scale:
-                </label>
-                <select 
-                  value={exportScale}
-                  onChange={(e) => setExportScale(Number(e.target.value))}
-                  className="w-full bg-purple-50/50 border border-purple-200 rounded-lg p-2.5 text-xs text-purple-950 font-bold focus:outline-none focus:border-purple-600 shadow-sm cursor-pointer"
-                >
-                  <option value={1}>1x (Draft Quality - Fast & Low Memory)</option>
-                  <option value={2}>2x (HD Print Quality - Recommended)</option>
-                  <option value={3}>3x (Ultra HD Print Quality - Heavy)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-zinc-700 block mb-2">Select Export Scope:</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button 
-                    onClick={() => setExportMode('all')}
-                    className={`p-3 rounded-lg border text-xs font-semibold flex items-center justify-center gap-2 transition ${exportMode === 'all' ? 'border-purple-600 bg-purple-50 text-purple-900' : 'border-zinc-200 bg-white text-zinc-600'}`}
-                  >
-                    <CheckSquare size={16} className="text-purple-600" /> Export All ({awardees.length})
-                  </button>
-                  <button 
-                    onClick={() => setExportMode('selected')}
-                    className={`p-3 rounded-lg border text-xs font-semibold flex items-center justify-center gap-2 transition ${exportMode === 'selected' ? 'border-purple-600 bg-purple-50 text-purple-900' : 'border-zinc-200 bg-white text-zinc-600'}`}
-                  >
-                    <Users size={16} className="text-purple-600" /> Choose Specific
-                  </button>
-                </div>
-              </div>
-
-              {exportMode === 'selected' && (
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center text-[11px] text-zinc-500">
-                    <span>Check awardees to include in ZIP:</span>
-                    <button 
-                      onClick={() => setSelectedExportIndices(awardees.map((_, i) => i))}
-                      className="text-purple-700 hover:underline font-medium"
-                    >
-                      Select All
-                    </button>
-                  </div>
-                  <div className="max-h-52 overflow-y-auto space-y-1.5 border border-purple-100 bg-purple-50/20 p-2 rounded-lg">
-                    {awardees.map((awardee, idx) => {
-                      const isChecked = selectedExportIndices.includes(idx);
-                      return (
-                        <label 
-                          key={awardee.id || idx}
-                          className="flex items-center justify-between p-2 rounded bg-white hover:bg-purple-50/60 cursor-pointer text-xs border border-purple-100/60 shadow-sm"
-                        >
-                          <span className="font-medium text-zinc-800">{idx + 1}. {awardee.name || '(Unnamed Awardee)'}</span>
-                          <input 
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedExportIndices(prev => [...prev, idx]);
-                              } else {
-                                setSelectedExportIndices(prev => prev.filter(i => i !== idx));
-                              }
-                            }}
-                            className="w-4 h-4 accent-purple-600 cursor-pointer rounded"
-                          />
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="p-4 border-t border-purple-100 bg-purple-50/50 flex justify-end gap-3 rounded-b-xl">
-              <button 
-                onClick={() => setIsExportModalOpen(false)}
-                className="px-4 py-2 bg-white border border-zinc-200 hover:bg-zinc-50 text-xs font-semibold text-zinc-700 rounded transition shadow-sm"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={executeBatchZipExport}
-                disabled={exportMode === 'selected' && selectedExportIndices.length === 0}
-                className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded shadow transition disabled:opacity-50 flex items-center gap-2"
-              >
-                <Download size={14} /> Generate & Download {exportFormat.toUpperCase()} ZIP
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <KeyboardShortcutModal isOpen={isKeyboardModalOpen} onClose={() => setIsKeyboardModalOpen(false)} />
+      <CSVInstructionsModal isOpen={isCsvModalOpen} onClose={() => setIsCsvModalOpen(false)} />
+      <QRInstructionsModal isOpen={isQrModalOpen} onClose={() => setIsQrModalOpen(false)} />
+      <ExportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        exportFormat={exportFormat}
+        setExportFormat={setExportFormat}
+        exportScale={exportScale}
+        setExportScale={setExportScale}
+        exportMode={exportMode}
+        setExportMode={setExportMode}
+        selectedExportIndices={selectedExportIndices}
+        setSelectedExportIndices={setSelectedExportIndices}
+        awardees={awardees}
+        executeBatchZipExport={executeBatchZipExport}
+        isExporting={isExporting}
+      />
 
       {/* TOP MENU BAR (Hidden in Preview Mode) */}
       {!isPreviewMode && (
-        <div className="h-12 bg-white border-b border-purple-200 flex items-center justify-between px-4 z-30 shadow-sm">
-          <div className="flex items-center gap-4">
-            <button 
-              onClick={() => setIsEditorLaunched(false)}
-              className="text-xs font-extrabold text-purple-900 tracking-wider hover:underline flex items-center gap-1"
-            >
-              ← Exit to Home
-            </button>
-
-            <span className="text-xs font-extrabold text-purple-900 tracking-wider flex items-center gap-1.5 uppercase">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 100" width="100%" height="100%" className="h-9 w-auto flex-shrink-0">
-                <defs>
-                  <linearGradient id="purpleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#9333ea" />
-                    <stop offset="100%" stopColor="#581c87" />
-                  </linearGradient>
-                </defs>
-                
-                <g transform="translate(10, 15) scale(0.75)">
-                  <rect x="12" y="12" width="64" height="64" rx="8" fill="#f3e8ff" opacity="0.6" />
-                  <rect x="4" y="4" width="64" height="64" rx="8" fill="url(#purpleGradient)" />
-                  <line x1="16" y1="20" x2="44" y2="20" stroke="#ffffff" strokeWidth="4" strokeLinecap="round" />
-                  <line x1="16" y1="32" x2="56" y2="32" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" opacity="0.8" />
-                  <line x1="16" y1="44" x2="36" y2="44" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" opacity="0.8" />
-                  <circle cx="50" cy="50" r="14" fill="#ffffff" />
-                  <path d="M44 50 L48 54 L57 44" fill="none" stroke="#581c87" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                </g>
-                <text x="80" y="58" fontFamily="'Inter', 'Helvetica', sans-serif" fontSize="28" fontWeight="800" fill="#581c87" letterSpacing="-0.5">
-                  Batch<tspan fontWeight="400" fill="#9333ea">Cert</tspan>
-                </text>
-              </svg>
-              </span>
-
-            <div className="flex items-center gap-1 text-xs">
-              <button 
-                onClick={handleNewProject}
-                className="px-2.5 py-1.5 hover:bg-purple-50 text-zinc-700 rounded font-medium flex items-center gap-1 transition"
-              >
-                <FilePlus size={13} className="text-purple-600" /> New
-              </button>
-
-              <label className="px-2.5 py-1.5 hover:bg-purple-50 text-zinc-700 rounded font-medium flex items-center gap-1 cursor-pointer transition">
-                <FolderOpen size={13} className="text-purple-600" /> Open
-                <input type="file" accept=".json" onChange={handleLoadProjectFromFile} className="hidden" />
-              </label>
-
-              <button 
-                onClick={handleSaveProject}
-                className="px-2.5 py-1.5 hover:bg-purple-50 text-zinc-700 rounded font-medium flex items-center gap-1 transition"
-              >
-                <Save size={13} className="text-purple-600" /> Save
-              </button>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-zinc-500 font-medium">Project Name:</span>
-              <input 
-                type="text" 
-                value={projectName} 
-                onChange={(e) => setProjectName(e.target.value)}
-                className="bg-purple-50/60 border border-purple-200 text-xs text-purple-950 font-semibold px-2.5 py-1 rounded focus:outline-none focus:border-purple-600 w-44 shadow-inner"
-              />
-            </div>
-
-            {/* Keyboard Shortcut Cheat Sheet Modal Trigger (?) */}
-            <button
-              onClick={() => setIsKeyboardModalOpen(true)}
-              className="p-1.5 bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 rounded-full transition shadow-sm flex items-center justify-center"
-              title="Keyboard Shortcuts Cheat Sheet"
-            >
-              <HelpCircle size={16} className="text-purple-700" />
-            </button>
-          </div>
-        </div>
+        <EditorTopBar
+          handleExitToHome={handleExitToHome}
+          handleNewProject={handleNewProject}
+          handleLoadProjectFromFile={handleLoadProjectFromFile}
+          handleSaveProject={handleSaveProject}
+          projectName={projectName}
+          setProjectName={setProjectName}
+          setIsKeyboardModalOpen={setIsKeyboardModalOpen}
+        />
       )}
 
       <div className="flex flex-1 overflow-hidden relative">
@@ -2514,11 +2266,11 @@ export default function CertificateGenerator() {
 
           {/* FIXED HEIGHT CANVAS TOOLBAR */}
           {!isPreviewMode && (
-            <div className="h-14 shrink-0 border-b border-purple-200 bg-white/95 backdrop-blur px-4 flex items-center justify-between gap-3 z-20 shadow-sm overflow-x-auto whitespace-nowrap">
-              
-              <div className="flex items-center gap-3 shrink-0">
-                {/* QUICK AWARDEE SWITCHER DROPDOWN */}
-                <div className="flex items-center gap-1 bg-purple-50/80 border border-purple-200 rounded-lg px-1.5 py-1 relative shadow-sm shrink-0">
+            <div className="h-14 shrink-0 border-b border-purple-200 bg-white/95 backdrop-blur px-4 flex items-center justify-between gap-3 z-20 shadow-sm overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+
+              {/* Left Section: Awardee Navigation */}
+              <div className="flex items-center gap-2 shrink-0 whitespace-nowrap">
+                <div className="flex items-center gap-1 bg-purple-50/80 border border-purple-200 rounded-lg px-1.5 py-1 shadow-sm shrink-0 whitespace-nowrap">
                   <button 
                     onClick={() => setCurrentAwardeeIdx(prev => Math.max(0, prev - 1))}
                     disabled={currentAwardeeIdx === 0}
@@ -2528,7 +2280,7 @@ export default function CertificateGenerator() {
                     <ChevronLeft size={14} />
                   </button>
 
-                  <div className="relative">
+                  <div className="relative shrink-0">
                     <button 
                       onClick={() => setIsAwardeeDropdownOpen(prev => !prev)}
                       className="text-xs text-purple-900 font-bold px-2 hover:bg-purple-100 rounded-md flex items-center gap-1 py-0.5 transition"
@@ -2537,40 +2289,15 @@ export default function CertificateGenerator() {
                       Awardee {currentAwardeeIdx + 1} of {awardees.length} ▾
                     </button>
 
-                    {isAwardeeDropdownOpen && (
-                      <div className="absolute left-0 mt-2 w-64 bg-white border border-purple-200 rounded-xl shadow-2xl z-50 p-2 space-y-2">
-                        <div className="flex items-center gap-1 bg-purple-50 px-2 py-1.5 rounded-lg border border-purple-200">
-                          <Search size={13} className="text-purple-600" />
-                          <input 
-                            type="text"
-                            placeholder="Search awardee..."
-                            value={awardeeSearchQuery}
-                            onChange={(e) => setAwardeeSearchQuery(e.target.value)}
-                            className="bg-transparent text-xs text-zinc-900 focus:outline-none w-full font-medium"
-                            autoFocus
-                          />
-                        </div>
-                        <div className="max-h-48 overflow-y-auto space-y-1">
-                          {awardees
-                            .map((a, idx) => ({ ...a, originalIdx: idx }))
-                            .filter(a => (a.name || '').toLowerCase().includes(awardeeSearchQuery.toLowerCase()))
-                            .map((a) => (
-                              <button
-                                key={a.id || a.originalIdx}
-                                onClick={() => {
-                                  setCurrentAwardeeIdx(a.originalIdx);
-                                  setIsAwardeeDropdownOpen(false);
-                                  setAwardeeSearchQuery('');
-                                }}
-                                className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between transition ${currentAwardeeIdx === a.originalIdx ? 'bg-purple-100 text-purple-950 font-bold' : 'hover:bg-purple-50 text-zinc-700'}`}
-                              >
-                                <span className="truncate">{a.originalIdx + 1}. {a.name || '(Unnamed)'}</span>
-                                {currentAwardeeIdx === a.originalIdx && <Check size={12} className="text-purple-700" />}
-                              </button>
-                            ))}
-                        </div>
-                      </div>
-                    )}
+                    <AwardeeDropdown
+                      isOpen={isAwardeeDropdownOpen}
+                      onClose={() => setIsAwardeeDropdownOpen(false)}
+                      awardees={awardees}
+                      currentAwardeeIdx={currentAwardeeIdx}
+                      searchQuery={awardeeSearchQuery}
+                      setSearchQuery={setAwardeeSearchQuery}
+                      onSelectAwardee={(idx) => setCurrentAwardeeIdx(idx)}
+                    />
                   </div>
 
                   <button 
@@ -2582,32 +2309,76 @@ export default function CertificateGenerator() {
                     <ChevronRight size={14} />
                   </button>
                 </div>
+              </div>
 
-                {/* Alignment & Distribution Tools */}
-                {selectedIds.length > 0 && (
-                  <div className="flex items-center gap-1 border border-purple-200 rounded-lg px-2 py-1 bg-purple-50/50 shadow-sm shrink-0">
-                    <span className="text-[10px] text-purple-900 uppercase font-bold mr-1">Align:</span>
-                    <button onClick={() => handleAlign('left')} className="p-1 text-zinc-700 hover:text-purple-700 hover:bg-purple-100 rounded transition" title="Align Left"><AlignLeft size={14} /></button>
-                    <button onClick={() => handleAlign('center')} className="p-1 text-zinc-700 hover:text-purple-700 hover:bg-purple-100 rounded transition" title="Align Center"><AlignCenter size={14} /></button>
-                    <button onClick={() => handleAlign('right')} className="p-1 text-zinc-700 hover:text-purple-700 hover:bg-purple-100 rounded transition" title="Align Right"><AlignRight size={14} /></button>
-                    {selectedIds.length >= 3 && (
-                      <>
-                        <div className="h-3 w-[1px] bg-purple-200 mx-1" />
-                        <span className="text-[10px] text-purple-900 uppercase font-bold mr-1">Distribute:</span>
-                        <button onClick={() => handleDistribute('horizontal')} className="px-1.5 py-0.5 text-[10px] text-purple-900 hover:bg-purple-200 bg-purple-100 rounded font-bold transition" title="Distribute Horizontally">H</button>
-                        <button onClick={() => handleDistribute('vertical')} className="px-1.5 py-0.5 text-[10px] text-purple-900 hover:bg-purple-200 bg-purple-100 rounded font-bold transition" title="Distribute Vertically">V</button>
-                      </>
-                    )}
-                    <button onClick={deleteSelectedElements} className="ml-2 px-2 py-0.5 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 rounded text-xs font-semibold transition">Delete ({selectedIds.length})</button>
-                  </div>
-                )}
+              {/* Right Section: Global Actions */}
+              <div className="flex items-center gap-2 shrink-0 whitespace-nowrap">
+                <button 
+                  onClick={() => setShowGuides(prev => !prev)}
+                  className={`px-2.5 py-1.5 border rounded-lg text-xs flex items-center gap-1 shrink-0 whitespace-nowrap transition font-bold shadow-sm ${showGuides ? 'bg-purple-100 border-purple-400 text-purple-950' : 'bg-white border-purple-200 text-zinc-600 hover:bg-purple-50'}`}
+                  title="Toggle Ruler Guides"
+                >
+                  <Grid size={13} className="text-purple-600" />
+                  <span className="hidden sm:inline">Guides</span>
+                </button>
+
+                <button 
+                  onClick={() => setIsPreviewMode(true)}
+                  className="px-2.5 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 rounded-lg text-xs flex items-center gap-1.5 shrink-0 whitespace-nowrap transition font-bold shadow-sm"
+                  title="Toggle Full-Screen Preview"
+                >
+                  <Maximize2 size={13} className="text-purple-600" />
+                  <span className="hidden sm:inline">Preview</span>
+                </button>
+
+                <div className="flex items-center gap-1 border border-purple-200 rounded-lg px-1.5 py-1 bg-white shadow-sm shrink-0 whitespace-nowrap">
+                  <button 
+                    onClick={handleUndo} 
+                    disabled={historyIndex === 0 || currentAwardee.hasCustomLayout} 
+                    className="p-1 hover:bg-purple-50 rounded text-zinc-700 disabled:opacity-30 transition" 
+                    title="Undo (Ctrl+Z)"
+                  >
+                    <Undo2 size={14} />
+                  </button>
+                  <button 
+                    onClick={handleRedo} 
+                    disabled={historyIndex >= history.length - 1 || currentAwardee.hasCustomLayout} 
+                    className="p-1 hover:bg-purple-50 rounded text-zinc-700 disabled:opacity-30 transition" 
+                    title="Redo (Ctrl+Y)"
+                  >
+                    <RotateCcw size={14} className="transform scale-x-[-1]" />
+                  </button>
+                </div>
+
+                <div className="h-4 w-px bg-purple-200" />
+
+                <button onClick={zoomOut} className="p-1.5 bg-white border border-purple-200 hover:bg-purple-50 rounded-lg text-zinc-700 shadow-sm transition" title="Zoom Out"><ZoomOut size={14} /></button>
+                <button onClick={resetZoom} className="text-xs font-bold text-purple-900" title="Reset Zoom">{Math.round(zoomMultiplier * 100)}%</button>
+                <button onClick={zoomIn} className="p-1.5 bg-white border border-purple-200 hover:bg-purple-50 rounded-lg text-zinc-700 shadow-sm transition" title="Zoom In"><ZoomIn size={14} /></button>
+              </div>
+            </div>
+          )}
+
+          <div 
+            ref={containerRef}
+            className={`flex-1 flex items-center justify-center p-12 overflow-auto relative select-none ${isPreviewMode ? 'bg-zinc-950' : 'bg-purple-50/20'}`}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+          >
+            {selectedIds.length > 0 && !isPreviewMode && (
+              <div className="absolute top-4 left-1/2 z-50 -translate-x-1/2 bg-white/95 backdrop-blur-md border border-purple-200 rounded-2xl shadow-2xl px-3 py-1.5 flex items-center gap-2">
+                <div className="flex items-center gap-1 border border-transparent rounded-full bg-purple-50/80 px-1 py-1">
+                  <button onClick={() => handleAlign('left')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-100 rounded-full transition" title="Align Left"><AlignLeft size={14} /></button>
+                  <button onClick={() => handleAlign('center')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-100 rounded-full transition" title="Align Center"><AlignCenter size={14} /></button>
+                  <button onClick={() => handleAlign('right')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-100 rounded-full transition" title="Align Right"><AlignRight size={14} /></button>
+                </div>
 
                 {selectedIds.length === 1 && primarySelectedElement && primarySelectedElement.type === 'text' ? (
-                  <div className="flex items-center gap-2 shrink-0">
+                  <>
                     <select 
                       value={primarySelectedElement.font} 
                       onChange={e => updateSelectedElement('font', e.target.value)}
-                      className="bg-white text-xs border border-purple-200 rounded-lg px-2.5 py-1 text-zinc-800 font-medium shadow-sm focus:outline-none focus:border-purple-600 max-w-[160px]"
+                      className="bg-white text-xs border border-purple-200 rounded-xl px-2 py-1 text-zinc-800 font-medium shadow-sm focus:outline-none focus:border-purple-600"
                     >
                       <optgroup label="Serif / Academic">
                         <option value="Cinzel">Cinzel</option>
@@ -2638,130 +2409,37 @@ export default function CertificateGenerator() {
                       </optgroup>
                     </select>
 
-                    <div className="flex items-center gap-1 border border-purple-200 rounded-lg px-2 py-1 bg-white shadow-sm shrink-0">
-                      <span className="text-xs text-zinc-500 font-medium">Size:</span>
+                    <div className="flex items-center gap-1 border border-purple-200 rounded-xl px-2 py-1 bg-white shadow-sm">
                       <input 
                         type="number" 
                         value={primarySelectedElement.fontSize} 
                         onChange={e => updateSelectedElement('fontSize', Number(e.target.value))}
-                        className="w-10 bg-transparent text-xs text-zinc-900 font-semibold focus:outline-none"
+                        className="w-14 bg-transparent text-xs text-zinc-900 font-semibold focus:outline-none"
+                        title="Font size"
                       />
-                      <span className="text-xs text-zinc-400">px</span>
+                      <span className="text-xs text-zinc-500">px</span>
                     </div>
 
-                    <div className="flex items-center gap-1 border border-purple-200 rounded-lg px-2 py-1 bg-white shadow-sm shrink-0">
-                      <span className="text-xs text-zinc-500 font-medium">Color:</span>
-                      <input 
-                        type="color" 
-                        value={primarySelectedElement.color || '#1f2937'} 
-                        onChange={e => updateSelectedElement('color', e.target.value)}
-                        className="w-6 h-5 bg-transparent cursor-pointer border-0 p-0 rounded"
-                      />
-                    </div>
+                    <input 
+                      type="color" 
+                      value={primarySelectedElement.color || '#1f2937'} 
+                      onChange={e => updateSelectedElement('color', e.target.value)}
+                      className="w-8 h-8 rounded-full border border-purple-200 p-0 cursor-pointer"
+                      title="Text color"
+                    />
 
-                    <div className="flex border border-purple-200 rounded-lg overflow-hidden bg-white shadow-sm shrink-0">
+                    <div className="flex items-center gap-1 border border-purple-200 rounded-xl overflow-hidden bg-white shadow-sm">
                       <button onClick={() => applyTextFormat('bold')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 transition" title="Bold"><Bold size={14} /></button>
                       <button onClick={() => applyTextFormat('italic')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 transition" title="Italic"><Italic size={14} /></button>
                       <button onClick={() => applyTextFormat('underline')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 transition" title="Underline"><Underline size={14} /></button>
                     </div>
-                    <button onClick={deleteSelectedElements} className="px-2.5 py-1 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 rounded-lg text-xs font-semibold shadow-sm transition shrink-0">Delete</button>
-                  </div>
-                ) : selectedIds.length === 1 && primarySelectedElement && (primarySelectedElement.type === 'line' || primarySelectedElement.type === 'logo') ? (
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-xs text-purple-900 font-bold">{primarySelectedElement.type === 'logo' ? 'Logo Element:' : 'Line Tool:'}</span>
-                    <div className="flex items-center gap-1 border border-purple-200 rounded-lg px-2 py-1 bg-white shadow-sm">
-                      <span className="text-xs text-zinc-500 font-medium">Width:</span>
-                      <input 
-                        type="number" 
-                        value={primarySelectedElement.width} 
-                        onChange={e => updateSelectedElement('width', Number(e.target.value))}
-                        className="w-14 bg-transparent text-xs text-zinc-900 font-semibold focus:outline-none"
-                      />
-                      <span className="text-xs text-zinc-400">px</span>
-                    </div>
-                    <button onClick={deleteSelectedElements} className="px-2.5 py-1 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 rounded-lg text-xs font-semibold shadow-sm transition">Delete</button>
-                  </div>
-                ) : selectedIds.length === 1 && primarySelectedElement && primarySelectedElement.type === 'qrcode' ? (
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-xs text-purple-900 font-bold flex items-center gap-1"><QrCode size={14} /> QR Code:</span>
-                    <div className="flex items-center gap-1 border border-purple-200 rounded-lg px-2 py-1 bg-white shadow-sm">
-                      <span className="text-xs text-zinc-500 font-medium">Data/URL:</span>
-                      <input 
-                        type="text" 
-                        value={primarySelectedElement.data || ''} 
-                        onChange={e => updateSelectedElement('data', e.target.value)}
-                        className="w-44 bg-transparent text-xs text-zinc-900 font-semibold focus:outline-none"
-                        placeholder="Enter URL or text"
-                      />
-                    </div>
-                    <div className="flex items-center gap-1 border border-purple-200 rounded-lg px-2 py-1 bg-white shadow-sm">
-                      <span className="text-xs text-zinc-500 font-medium">Size:</span>
-                      <input 
-                        type="number" 
-                        value={primarySelectedElement.size || 90} 
-                        onChange={e => updateSelectedElement('size', Number(e.target.value))}
-                        className="w-12 bg-transparent text-xs text-zinc-900 font-semibold focus:outline-none"
-                      />
-                      <span className="text-xs text-zinc-400">px</span>
-                    </div>
-                    <button onClick={deleteSelectedElements} className="px-2.5 py-1 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 rounded-lg text-xs font-semibold shadow-sm transition">Delete</button>
-                  </div>
+                  </>
                 ) : null}
+
+                <button onClick={deleteSelectedElements} className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-full transition" title="Delete selected"><Trash2 size={16} /></button>
               </div>
+            )}
 
-              <div className="flex items-center gap-3 shrink-0">
-                {/* GUIDES TOGGLE BUTTON */}
-                <button 
-                  onClick={() => setShowGuides(prev => !prev)}
-                  className={`px-2.5 py-1.5 border rounded-lg text-xs flex items-center gap-1.5 transition font-bold shadow-sm ${showGuides ? 'bg-purple-100 border-purple-400 text-purple-950' : 'bg-white border-purple-200 text-zinc-600 hover:bg-purple-50'}`}
-                  title="Toggle Ruler Guides"
-                >
-                  <Grid size={13} className="text-purple-600" /> Guides: {showGuides ? 'On' : 'Off'}
-                </button>
-
-                {/* PREVIEW MODE TOGGLE BUTTON */}
-                <button 
-                  onClick={() => setIsPreviewMode(true)}
-                  className="px-2.5 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 rounded-lg text-xs flex items-center gap-1.5 transition font-bold shadow-sm"
-                  title="Toggle Full-Screen Preview"
-                >
-                  <Maximize2 size={13} className="text-purple-600" /> Preview Mode
-                </button>
-
-                <div className="flex items-center gap-1 border border-purple-200 rounded-lg px-1.5 py-1 bg-white shadow-sm">
-                  <button 
-                    onClick={handleUndo} 
-                    disabled={historyIndex === 0 || currentAwardee.hasCustomLayout} 
-                    className="p-1 hover:bg-purple-50 rounded text-zinc-700 disabled:opacity-30 transition" 
-                    title="Undo (Ctrl+Z)"
-                  >
-                    <Undo2 size={14} />
-                  </button>
-                  <button 
-                    onClick={handleRedo} 
-                    disabled={historyIndex >= history.length - 1 || currentAwardee.hasCustomLayout} 
-                    className="p-1 hover:bg-purple-50 rounded text-zinc-700 disabled:opacity-30 transition" 
-                    title="Redo (Ctrl+Y)"
-                  >
-                    <RotateCcw size={14} className="transform scale-x-[-1]" />
-                  </button>
-                </div>
-
-                <div className="h-4 w-[1px] bg-purple-200" />
-
-                <button onClick={zoomOut} className="p-1.5 bg-white border border-purple-200 hover:bg-purple-50 rounded-lg text-zinc-700 shadow-sm transition" title="Zoom Out"><ZoomOut size={14} /></button>
-                <button onClick={resetZoom} className="text-xs font-bold text-purple-900" title="Reset Zoom">{Math.round(zoomMultiplier * 100)}%</button>
-                <button onClick={zoomIn} className="p-1.5 bg-white border border-purple-200 hover:bg-purple-50 rounded-lg text-zinc-700 shadow-sm transition" title="Zoom In"><ZoomIn size={14} /></button>
-              </div>
-            </div>
-          )}
-
-          <div 
-            ref={containerRef}
-            className={`flex-1 flex items-center justify-center p-12 overflow-auto relative select-none ${isPreviewMode ? 'bg-zinc-950' : 'bg-purple-50/20'}`}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-          >
             <div 
               className="relative flex-shrink-0"
               style={{

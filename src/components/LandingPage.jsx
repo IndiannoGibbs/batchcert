@@ -1,10 +1,10 @@
+// LandingPage.jsx
 import React from 'react';
 import { Download, Upload, QrCode, Layers, ShieldCheck, Sparkles, ArrowRight, CheckCircle2, Coffee } from 'lucide-react';
 
 export default function LandingPage({ onLaunchApp }) {
   return (
     <div className="min-h-screen bg-purple-950 text-white font-sans selection:bg-purple-500 selection:text-white">
-      
       {/* NAVBAR */}
       <nav className="h-16 border-b border-purple-900 px-6 flex items-center justify-between sticky top-0 bg-purple-950/90 backdrop-blur z-40">
         <div className="flex items-center gap-2">
@@ -158,7 +158,6 @@ export default function LandingPage({ onLaunchApp }) {
           </a>
         </div>
       </footer>
-
     </div>
   );
 }

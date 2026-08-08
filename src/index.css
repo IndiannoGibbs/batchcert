@@ -109,3 +109,38 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+@keyframes batchcert-file-fill {
+  0% {
+    transform: translateY(100%);
+    opacity: 0.65;
+  }
+  40% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0%);
+    opacity: 1;
+  }
+}
+
+.animate-batchcert-file-fill {
+  animation: batchcert-file-fill 0.85s ease-out forwards;
+}
+
+@keyframes batchcert-float-blob {
+  0%, 100% {
+    transform: translateY(0px) translateX(0px) scale(1);
+  }
+  50% {
+    transform: translateY(-24px) translateX(12px) scale(1.05);
+  }
+}
+
+.animate-float-blob {
+  animation: batchcert-float-blob 14s ease-in-out infinite;
+}
+
+.animation-delay-2000 {
+  animation-delay: 2s;
+}
