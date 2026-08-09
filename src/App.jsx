@@ -209,7 +209,14 @@ export default function CertificateGenerator() {
   const initialElements = [];
   const [elements, setElements] = useState(initialElements);
 
-  const [history, setHistory] = useState([initialElements]);
+  const initialHistoryState = {
+    elements: initialElements,
+    globalData,
+    awardees,
+    signatories
+  };
+
+  const [history, setHistory] = useState([initialHistoryState]);
   const [historyIndex, setHistoryIndex] = useState(0);
 
   const [editingElementId, setEditingElementId] = useState(null);
@@ -283,6 +290,8 @@ export default function CertificateGenerator() {
     } else {
       setElements(updatedEls);
     }
+
+    return updatedEls;
   };
 
   const handleGlobalDataChange = (key, val) => {
@@ -366,7 +375,12 @@ export default function CertificateGenerator() {
         if (state.elements) {
           const cleaned = deduplicateElements(state.elements);
           setElements(cleaned);
-          setHistory([cleaned]);
+          setHistory([{
+            elements: cleaned,
+            globalData: state.globalData !== undefined ? state.globalData : globalData,
+            awardees: state.awardees !== undefined ? state.awardees : awardees,
+            signatories: state.signatories !== undefined ? state.signatories : signatories
+          }]);
           setHistoryIndex(0);
         }
       } catch (err) {
@@ -384,32 +398,63 @@ export default function CertificateGenerator() {
     }
   }, [bgType, customBg, bgTransform, logoImg, globalData, signatories, awardees, csvHeaders, elements, projectName, canvasSize]);
 
-  const pushHistory = (newElements) => {
-    const cleaned = deduplicateElements(newElements);
+  const createHistorySnapshot = (nextElements = elements, nextGlobalData = globalData, nextAwardees = awardees, nextSignatories = signatories) => {
+    const cleaned = deduplicateElements(nextElements);
+    return {
+      elements: JSON.parse(JSON.stringify(cleaned)),
+      globalData: JSON.parse(JSON.stringify(nextGlobalData)),
+      awardees: JSON.parse(JSON.stringify(nextAwardees)),
+      signatories: JSON.parse(JSON.stringify(nextSignatories))
+    };
+  };
+
+  const commitHistorySnapshot = (nextElements = elements, nextGlobalData = globalData, nextAwardees = awardees, nextSignatories = signatories) => {
+    if (currentAwardee.hasCustomLayout) return;
+    const snapshot = createHistorySnapshot(nextElements, nextGlobalData, nextAwardees, nextSignatories);
+    const lastSnapshot = history[historyIndex];
+    if (lastSnapshot && JSON.stringify(lastSnapshot) === JSON.stringify(snapshot)) return;
+    const updatedHistory = history.slice(0, historyIndex + 1);
+    updatedHistory.push(snapshot);
+    setHistory(updatedHistory);
+    setHistoryIndex(updatedHistory.length - 1);
+    setElements(JSON.parse(JSON.stringify(snapshot.elements)));
+  };
+
+  const pushHistory = (newElements, nextGlobalData = globalData, nextAwardees = awardees, nextSignatories = signatories) => {
+    const snapshot = createHistorySnapshot(newElements, nextGlobalData, nextAwardees, nextSignatories);
+
     if (currentAwardee.hasCustomLayout) {
-      setAwardees(prev => prev.map((a, idx) => idx === currentAwardeeIdx ? { ...a, customElements: cleaned } : a));
+      setAwardees(prev => prev.map((a, idx) => idx === currentAwardeeIdx ? { ...a, customElements: snapshot.elements } : a));
     } else {
       const updatedHistory = history.slice(0, historyIndex + 1);
-      updatedHistory.push(cleaned);
+      updatedHistory.push(snapshot);
       setHistory(updatedHistory);
       setHistoryIndex(updatedHistory.length - 1);
-      setElements(cleaned);
+      setElements(JSON.parse(JSON.stringify(snapshot.elements)));
     }
   };
 
   const handleUndo = () => {
     if (!currentAwardee.hasCustomLayout && historyIndex > 0) {
       const prevIndex = historyIndex - 1;
+      const snapshot = history[prevIndex];
       setHistoryIndex(prevIndex);
-      setElements(history[prevIndex]);
+      setElements(JSON.parse(JSON.stringify(snapshot.elements)));
+      setGlobalData(JSON.parse(JSON.stringify(snapshot.globalData)));
+      setAwardees(JSON.parse(JSON.stringify(snapshot.awardees)));
+      setSignatories(JSON.parse(JSON.stringify(snapshot.signatories)));
     }
   };
 
   const handleRedo = () => {
     if (!currentAwardee.hasCustomLayout && historyIndex < history.length - 1) {
       const nextIndex = historyIndex + 1;
+      const snapshot = history[nextIndex];
       setHistoryIndex(nextIndex);
-      setElements(history[nextIndex]);
+      setElements(JSON.parse(JSON.stringify(snapshot.elements)));
+      setGlobalData(JSON.parse(JSON.stringify(snapshot.globalData)));
+      setAwardees(JSON.parse(JSON.stringify(snapshot.awardees)));
+      setSignatories(JSON.parse(JSON.stringify(snapshot.signatories)));
     }
   };
 
@@ -600,12 +645,14 @@ export default function CertificateGenerator() {
 
   const handleNewProject = () => {
     if (window.confirm('Create a new blank certificate project? All fields will be blank.')) {
-      setGlobalData({ orgName: '', orgSubtext: '', dateLine: '', certificateTitle: '', eventDuties: '', bodyTemplate: '' });
+      const blankGlobalData = { orgName: '', orgSubtext: '', dateLine: '', certificateTitle: '', eventDuties: '', bodyTemplate: '' };
+      const blankAwardees = [{ id: '1', name: '', position: '', csvData: { Name: '', Position: '' }, hasCustomLayout: false, customElements: null, customSignatories: null }];
+      setGlobalData(blankGlobalData);
       setSignatories([{ id: 'sig_1', name: '', title: '', signatureImg: null }]);
       setElements([]);
-      setHistory([[]]);
+      setHistory([{ elements: [], globalData: blankGlobalData, awardees: blankAwardees, signatories: [{ id: 'sig_1', name: '', title: '', signatureImg: null }] }]);
       setHistoryIndex(0);
-      setAwardees([{ id: '1', name: '', position: '', csvData: { Name: '', Position: '' }, hasCustomLayout: false, customElements: null, customSignatories: null }]);
+      setAwardees(blankAwardees);
       setCsvHeaders(['Name', 'Position']);
       setCurrentAwardeeIdx(0);
       setProjectName('Blank_BatchCert_Project');
@@ -648,7 +695,12 @@ export default function CertificateGenerator() {
         if (state.elements) {
           const cleaned = deduplicateElements(state.elements);
           setElements(cleaned);
-          setHistory([cleaned]);
+          setHistory([{
+            elements: cleaned,
+            globalData: state.globalData !== undefined ? state.globalData : globalData,
+            awardees: state.awardees !== undefined ? state.awardees : awardees,
+            signatories: state.signatories !== undefined ? state.signatories : signatories
+          }]);
           setHistoryIndex(0);
         }
         alert('Project loaded successfully from file!');
@@ -690,7 +742,11 @@ export default function CertificateGenerator() {
         if (state.elements) {
           const cleaned = deduplicateElements(state.elements);
           setElements(cleaned);
-          setHistory([cleaned]);
+          setHistory([{
+            elements: cleaned,
+            globalData,
+            awardees
+          }]);
           setHistoryIndex(0);
         }
         if (state.signatories) setSignatories(state.signatories);
@@ -917,8 +973,9 @@ export default function CertificateGenerator() {
       const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag);
       const isEditingInline = document.activeElement?.isContentEditable;
 
+      if (isInput || isEditingInline) return;
+
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
-        if (isInput) return;
         e.preventDefault();
         if (e.shiftKey) {
           handleRedo();
@@ -929,7 +986,6 @@ export default function CertificateGenerator() {
       }
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
-        if (isInput) return;
         e.preventDefault();
         handleRedo();
         return;
@@ -1063,34 +1119,62 @@ export default function CertificateGenerator() {
 
   const saveInlineEdit = (el, val) => {
     setEditingElementId(null);
+
     if (el.key === 'awardeeName') {
-      setAwardees(prev => prev.map((a, idx) => {
+      const updatedAwardees = awardees.map((a, idx) => {
         if (idx === currentAwardeeIdx) {
           return { ...a, name: val, csvData: { ...(a.csvData || {}), Name: val } };
         }
         return a;
-      }));
-    } else if (el.key === 'awardeePosition') {
-      setAwardees(prev => prev.map((a, idx) => {
+      });
+      setAwardees(updatedAwardees);
+      commitHistorySnapshot(elements, globalData, updatedAwardees, signatories);
+      return;
+    }
+
+    if (el.key === 'awardeePosition') {
+      const updatedAwardees = awardees.map((a, idx) => {
         if (idx === currentAwardeeIdx) {
           return { ...a, position: val, csvData: { ...(a.csvData || {}), Position: val } };
         }
         return a;
-      }));
-    } else if (el.key) {
-      setGlobalData(prev => ({ ...prev, [el.key]: val }));
-      updateElementByKeyOrSig({ key: el.key }, val);
-    } else if (el.sigId) {
-      if (currentAwardee.hasCustomLayout) {
-        const updatedSigs = activeSignatories.map(s => s.id === el.sigId ? { ...s, [sigField]: val } : s);
-        setAwardees(prev => prev.map((a, idx) => idx === currentAwardeeIdx ? { ...a, customSignatories: updatedSigs } : a));
-      } else {
-        setSignatories(prev => prev.map(s => s.id === el.sigId ? { ...s, [sigField]: val } : s));
-      }
-    } else {
-      const updated = activeElements.map(item => item.id === el.id ? { ...item, text: val } : item);
-      pushHistory(updated);
+      });
+      setAwardees(updatedAwardees);
+      commitHistorySnapshot(elements, globalData, updatedAwardees, signatories);
+      return;
     }
+
+    if (el.key) {
+      const updatedGlobalData = { ...globalData, [el.key]: val };
+      const updatedElements = updateElementByKeyOrSig({ key: el.key }, val, {
+        x: el.x || 50,
+        y: el.y || 50,
+        fontSize: el.fontSize || 20,
+        font: el.font || 'Inter',
+        color: el.color || '#1f2937',
+        bold: el.bold || false,
+        maxWidth: el.maxWidth || 80,
+        align: el.align || 'center'
+      });
+      setGlobalData(updatedGlobalData);
+      setElements(updatedElements);
+      commitHistorySnapshot(updatedElements, updatedGlobalData, awardees, signatories);
+      return;
+    }
+
+    if (el.sigId) {
+      const updatedSignatories = activeSignatories.map(s => s.id === el.sigId ? { ...s, [el.sigField]: val } : s);
+      if (currentAwardee.hasCustomLayout) {
+        setAwardees(prev => prev.map((a, idx) => idx === currentAwardeeIdx ? { ...a, customSignatories: updatedSignatories } : a));
+      } else {
+        setSignatories(updatedSignatories);
+      }
+      commitHistorySnapshot(elements, globalData, awardees, updatedSignatories);
+      return;
+    }
+
+    const updated = activeElements.map(item => item.id === el.id ? { ...item, text: val } : item);
+    pushHistory(updated);
   };
 
   const handleCanvasPointerDown = (e) => {
@@ -1715,6 +1799,7 @@ export default function CertificateGenerator() {
                         type="text" 
                         value={globalData.orgName} 
                         onChange={e => handleGlobalDataChange('orgName', e.target.value)}
+                        onBlur={() => commitHistorySnapshot()}
                         className="w-full mt-1 bg-white border border-purple-200 rounded px-2.5 py-1.5 text-xs text-zinc-900 focus:outline-none focus:border-purple-600 shadow-sm"
                       />
                     </div>
@@ -1724,6 +1809,7 @@ export default function CertificateGenerator() {
                         rows={2}
                         value={globalData.orgSubtext} 
                         onChange={e => handleGlobalDataChange('orgSubtext', e.target.value)}
+                        onBlur={() => commitHistorySnapshot()}
                         className="w-full mt-1 bg-white border border-purple-200 rounded p-1.5 text-xs text-zinc-900 focus:outline-none focus:border-purple-600 shadow-sm"
                       />
                     </div>
@@ -1733,6 +1819,7 @@ export default function CertificateGenerator() {
                         type="text" 
                         value={globalData.certificateTitle} 
                         onChange={e => handleGlobalDataChange('certificateTitle', e.target.value)}
+                        onBlur={() => commitHistorySnapshot()}
                         className="w-full mt-1 bg-white border border-purple-200 rounded px-2.5 py-1.5 text-xs text-zinc-900 focus:outline-none focus:border-purple-600 shadow-sm"
                       />
                     </div>
@@ -1742,6 +1829,7 @@ export default function CertificateGenerator() {
                         rows={3}
                         value={globalData.eventDuties} 
                         onChange={e => handleGlobalDataChange('eventDuties', e.target.value)}
+                        onBlur={() => commitHistorySnapshot()}
                         className="w-full mt-1 bg-white border border-purple-200 rounded p-1.5 text-xs text-purple-950 font-medium focus:outline-none focus:border-purple-600 shadow-sm"
                       />
                     </div>
@@ -1751,6 +1839,7 @@ export default function CertificateGenerator() {
                         rows={3}
                         value={globalData.bodyTemplate} 
                         onChange={e => handleGlobalDataChange('bodyTemplate', e.target.value)}
+                        onBlur={() => commitHistorySnapshot()}
                         className="w-full mt-1 bg-white border border-purple-200 rounded p-1.5 text-xs text-zinc-900 focus:outline-none focus:border-purple-600 shadow-sm"
                       />
                     </div>
@@ -1760,6 +1849,7 @@ export default function CertificateGenerator() {
                         rows={2}
                         value={globalData.dateLine} 
                         onChange={e => handleGlobalDataChange('dateLine', e.target.value)}
+                        onBlur={() => commitHistorySnapshot()}
                         className="w-full mt-1 bg-white border border-purple-200 rounded p-1.5 text-xs text-zinc-900 focus:outline-none focus:border-purple-600 shadow-sm"
                       />
                     </div>
@@ -1838,6 +1928,7 @@ export default function CertificateGenerator() {
                                 type="text" 
                                 value={item.name} 
                                 onChange={(e) => handleAwardeeChange('name', e.target.value)}
+                                onBlur={() => commitHistorySnapshot()}
                                 placeholder="Awardee Name"
                                 className="w-full bg-transparent font-bold text-sm text-zinc-900 focus:outline-none"
                               />
@@ -1855,6 +1946,7 @@ export default function CertificateGenerator() {
                                 type="text" 
                                 value={item.position} 
                                 onChange={(e) => handleAwardeeChange('position', e.target.value)}
+                                onBlur={() => commitHistorySnapshot()}
                                 placeholder="Position / Designation"
                                 className="w-full bg-white border border-purple-200 rounded px-2 py-1 text-xs text-purple-950 font-semibold focus:outline-none focus:border-purple-600 uppercase shadow-sm"
                               />
@@ -1955,6 +2047,7 @@ export default function CertificateGenerator() {
                           type="text" 
                           value={sig.name} 
                           onChange={e => handleSignatoryChange(sig.id, 'name', e.target.value)}
+                          onBlur={() => commitHistorySnapshot()}
                           placeholder="Signatory Name"
                           className="w-full bg-white border border-purple-200 rounded px-2.5 py-1.5 text-xs font-bold text-zinc-900 shadow-sm focus:outline-none focus:border-purple-600"
                         />
@@ -1963,6 +2056,7 @@ export default function CertificateGenerator() {
                           type="text" 
                           value={sig.title} 
                           onChange={e => handleSignatoryChange(sig.id, 'title', e.target.value)}
+                          onBlur={() => commitHistorySnapshot()}
                           placeholder="Title / Office"
                           className="w-full bg-white border border-purple-200 rounded px-2.5 py-1.5 text-xs text-zinc-600 shadow-sm focus:outline-none focus:border-purple-600"
                         />
