@@ -65,6 +65,20 @@ export default function LandingPage({ onLaunchApp }) {
                 Explore Features
               </a>
             </div>
+            <div className="mt-8 flex justify-center">
+              <a
+                href="https://www.producthunt.com/products/batchcert?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-batchcert"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <img
+                  alt="BatchCert - Generate hundreds of custom certificates instantly 100% free | Product Hunt"
+                  width="250"
+                  height="54"
+                  src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1217253&theme=dark&t=1786242307128"
+                />
+              </a>
+            </div>
           </div>
         </section>
 
