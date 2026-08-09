@@ -44,7 +44,7 @@ export default function LandingPage({ onLaunchApp }) {
             </div>
 
             <h1 className="text-4xl font-extrabold tracking-tight text-white sm:text-5xl md:text-6xl lg:text-7xl">
-              Build batch certificates with <span className="bg-gradient-to-r from-purple-400 via-violet-300 to-indigo-400 bg-clip-text text-transparent">industrial-grade</span> speed and <span className="bg-gradient-to-r from-purple-400 via-violet-300 to-indigo-400 bg-clip-text text-transparent">effortless</span> design.
+              Generate <span className="bg-gradient-to-r from-purple-400 via-violet-300 to-indigo-400 bg-clip-text text-transparent">500+</span> Custom Certificates <span className="bg-gradient-to-r from-purple-400 via-violet-300 to-indigo-400 bg-clip-text text-transparent">Effortlessly</span>
             </h1>
 
             <p className="mx-auto max-w-2xl text-sm leading-7 text-slate-300 sm:text-base md:text-lg">
