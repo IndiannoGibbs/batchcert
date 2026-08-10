@@ -464,6 +464,56 @@ export default function CertificateGenerator() {
   const [marquee, setMarquee] = useState(null); 
   const dragStartRef = useRef({ clickX: 0, clickY: 0, initialPositions: {} });
   const resizeStartRef = useRef({ startX: 0, startWidth: 50, startElementWidth: 180 });
+  const clientCoordsRef = useRef(null);
+  const editingNodeRef = useRef(null);
+
+  useEffect(() => {
+    if (!editingElementId) {
+      clientCoordsRef.current = null;
+      return;
+    }
+
+    setTimeout(() => {
+      try {
+        const sel = window.getSelection();
+        if (!sel) return;
+
+        const el = activeElements.find(a => a.id === editingElementId);
+        if (!el) return;
+
+        const node = editingNodeRef.current;
+        if (!node) return;
+
+        // Initialize content once to avoid React overwriting selection
+        node.innerHTML = getElementText(el);
+        node.focus();
+
+        const coords = clientCoordsRef.current;
+        if (!coords) return;
+
+        let range = null;
+        if (typeof document.caretRangeFromPoint === 'function') {
+          range = document.caretRangeFromPoint(coords.x, coords.y);
+        } else if (typeof document.caretPositionFromPoint === 'function') {
+          const pos = document.caretPositionFromPoint(coords.x, coords.y);
+          if (pos) {
+            range = document.createRange();
+            range.setStart(pos.offsetNode, pos.offset);
+            range.collapse(true);
+          }
+        }
+
+        if (range) {
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      } catch (err) {
+        // ignore
+      } finally {
+        clientCoordsRef.current = null;
+      }
+    }, 0);
+  }, [editingElementId]);
 
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
@@ -2646,12 +2696,11 @@ export default function CertificateGenerator() {
                       }}
                     >
                       {el.type === 'text' ? (
-                        isEditing ? (
+                          isEditing ? (
                           <div
+                            ref={editingNodeRef}
                             contentEditable
                             suppressContentEditableWarning
-                            autoFocus
-                            dangerouslySetInnerHTML={{ __html: getElementText(el) }}
                             onBlur={(e) => saveInlineEdit(el, e.currentTarget.innerHTML)}
                             onKeyDown={(e) => { if (e.key === 'Escape') saveInlineEdit(el, e.currentTarget.innerHTML); }}
                             onPointerDown={(e) => e.stopPropagation()}
@@ -2667,7 +2716,7 @@ export default function CertificateGenerator() {
                           />
                         ) : (
                           <div 
-                            onDoubleClick={(e) => { if (!isPreviewMode) { e.stopPropagation(); setEditingElementId(el.id); } }}
+                            onDoubleClick={(e) => { if (!isPreviewMode) { e.stopPropagation(); clientCoordsRef.current = { x: e.clientX, y: e.clientY }; setEditingElementId(el.id); } }}
                             style={{
                               fontFamily: getFontFamily(el.font),
                               fontSize: `${el.fontSize}px`,
