@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import {
   Download, QrCode, Layers, Sparkles, ArrowRight, Coffee, BookOpen,
-  FileSpreadsheet, Cloud, Shield, Eye, Upload, CheckCircle2, ChevronDown,
+  FileSpreadsheet, Cloud, Shield, Eye, Upload, CheckCircle2, ChevronDown, FolderOpen,
 } from 'lucide-react';
 import LandingProductPreview from './landing/LandingProductPreview';
 
@@ -86,7 +86,7 @@ function FaqItem({ q, a, open, onToggle }) {
   );
 }
 
-export default function LandingPage({ onLaunchApp, onLaunchWithSample, onOpenDocs }) {
+export default function LandingPage({ onLaunchApp, onLaunchWithSample, onOpenDocs, onOpenProjectFile }) {
   const [openFaq, setOpenFaq] = useState(0);
 
   return (
@@ -162,6 +162,10 @@ export default function LandingPage({ onLaunchApp, onLaunchWithSample, onOpenDoc
                 >
                   <FileSpreadsheet size="16" className="mr-2" /> Try Sample Project
                 </button>
+                <label className="w-full sm:w-auto inline-flex items-center justify-center rounded-full border border-purple-300 bg-white px-6 py-3.5 text-sm font-semibold text-purple-800 transition hover:bg-purple-50 cursor-pointer">
+                  <input type="file" accept=".json,application/json" onChange={onOpenProjectFile} className="hidden" />
+                  <FolderOpen size="16" className="mr-2" /> Open Saved Project
+                </label>
               </div>
 
               <p className="text-xs text-zinc-500">
@@ -381,6 +385,10 @@ export default function LandingPage({ onLaunchApp, onLaunchWithSample, onOpenDoc
             >
               Open Sample Project
             </button>
+            <label className="w-full sm:w-auto inline-flex items-center justify-center rounded-full border border-purple-300 bg-white px-8 py-4 text-sm font-bold text-purple-800 hover:bg-purple-50 transition cursor-pointer">
+              <input type="file" accept=".json,application/json" onChange={onOpenProjectFile} className="hidden" />
+              Open Saved Project
+            </label>
           </div>
         </section>
       </main>

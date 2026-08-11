@@ -1,4 +1,7 @@
 import { AUTOSAVE_KEY } from '../constants/index.js';
+import { isAutosaveEmpty } from './autosaveEmpty.js';
+
+export { isAutosaveEmpty };
 
 export const buildProjectState = (state) => ({
   ...state,
@@ -6,12 +9,17 @@ export const buildProjectState = (state) => ({
 });
 
 export const saveProjectToAutosave = (state) => {
+  if (isAutosaveEmpty(state)) {
+    clearAutosaveProject();
+    return { ok: true, cleared: true };
+  }
+
   try {
     localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(buildProjectState(state)));
-    return true;
+    return { ok: true };
   } catch (err) {
     console.warn('LocalStorage quota exceeded.', err);
-    return false;
+    return { ok: false, error: err };
   }
 };
 
@@ -53,13 +61,12 @@ export const formatAutosaveTimeShort = (isoString) => {
   }
 };
 
-export const isAutosaveEmpty = (state) => {
-  if (!state) return true;
-  const hasAwardees = (state.awardees || []).some(a =>
-    a.name?.trim() || a.position?.trim() || Object.values(a.csvData || {}).some(v => v?.trim())
-  );
-  const hasElements = (state.elements || []).length > 0;
-  const hasGlobal = Object.values(state.globalData || {}).some(v => v?.trim());
-  const hasAssets = state.customBg || state.logoImg;
-  return !hasAwardees && !hasElements && !hasGlobal && !hasAssets;
+export const getAutosaveProjectIfRestorable = () => {
+  if (!hasAutosaveProject()) return null;
+  const saved = loadAutosaveProject();
+  if (!saved || isAutosaveEmpty(saved)) {
+    clearAutosaveProject();
+    return null;
+  }
+  return saved;
 };

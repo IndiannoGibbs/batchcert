@@ -29,7 +29,7 @@ import CertificateGridView from './components/CertificateGridView';
 import { GOOGLE_FONTS, CANVAS_PRESETS, PRESET_BACKGROUNDS } from './constants/index.js';
 import { SAMPLE_PROJECT } from './constants/sampleProject.js';
 import { deduplicateElements, getTextElementTransform } from './lib/elements.js';
-import { clearAutosaveProject, hasAutosaveProject, formatAutosaveTimeShort } from './lib/autosave.js';
+import { clearAutosaveProject, formatAutosaveTimeShort, isAutosaveEmpty } from './lib/autosave.js';
 import {
   parseCsvText,
   guessDefaultMapping,
@@ -43,8 +43,9 @@ import { ensureAwardeeFieldElements } from './lib/awardeeCanvasElements.js';
 import { getExportSummary } from './lib/export/pdfHelpers.js';
 import { estimateExport } from './lib/export/estimateExport.js';
 import { validateAwardees } from './lib/awardeeValidation.js';
-import { getProjectAppliers, buildProjectSnapshot } from './lib/projectState.js';
+import { getProjectAppliers, buildProjectSnapshot, normalizeLoadedProjectState } from './lib/projectState.js';
 import { useAutoSave, useAutosaveRestore } from './hooks/useAutoSave.js';
+import { useMessageDialog } from './hooks/useMessageDialog.jsx';
 import { useCertificateExport } from './hooks/useCertificateExport.js';
 import { isOnboardingComplete, markOnboardingComplete } from './lib/onboarding.js';
 import { isPdfFile } from './lib/pdf/pdfFileUtils.js';
@@ -54,25 +55,6 @@ export default function CertificateGenerator() {
   const [isEditorLaunched, setIsEditorLaunched] = useState(false);
   const [isLaunchingEditor, setIsLaunchingEditor] = useState(false);
   const [isReturningHome, setIsReturningHome] = useState(false);
-
-  const handleLaunchEditor = (withSample = false) => {
-    if (isLaunchingEditor || isReturningHome) return;
-    if (withSample) setLaunchWithSample(true);
-    setIsLaunchingEditor(true);
-    setIsReturningHome(false);
-    window.setTimeout(() => {
-      setIsEditorLaunched(true);
-      setIsLaunchingEditor(false);
-      if (withSample || launchWithSample) {
-        setPostLaunchAction('sample');
-        setLaunchWithSample(false);
-      } else if (hasAutosaveProject()) {
-        setPostLaunchAction('restore');
-      } else if (!isOnboardingComplete()) {
-        setPostLaunchAction('onboard');
-      }
-    }, 850);
-  };
 
   const handleCompleteOnboarding = () => {
     markOnboardingComplete();
@@ -90,16 +72,6 @@ export default function CertificateGenerator() {
 
   const handleOnboardingCsvImport = ({ headers, rows, nameColumn, positionColumn }) => {
     finalizeCsvImport({ headers, rows, nameColumn, positionColumn });
-  };
-
-  const handleExitToHome = () => {
-    if (isReturningHome || isLaunchingEditor) return;
-    setIsReturningHome(true);
-    setIsLaunchingEditor(false);
-    window.setTimeout(() => {
-      setIsEditorLaunched(false);
-      setIsReturningHome(false);
-    }, 850);
   };
 
   const [activeTab, setActiveTab] = useState('data');
@@ -175,7 +147,6 @@ export default function CertificateGenerator() {
   const [selectedExportIndices, setSelectedExportIndices] = useState([]);
   const [parsedCsvDraft, setParsedCsvDraft] = useState(null);
   const [isCsvImportModalOpen, setIsCsvImportModalOpen] = useState(false);
-  const [showRestoreModal, setShowRestoreModal] = useState(false);
   const [showOnboardingWizard, setShowOnboardingWizard] = useState(false);
   const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
@@ -183,6 +154,7 @@ export default function CertificateGenerator() {
   const [copiedTextStyle, setCopiedTextStyle] = useState(null);
   const [launchWithSample, setLaunchWithSample] = useState(false);
   const [postLaunchAction, setPostLaunchAction] = useState(null);
+  const pendingFileProjectRef = useRef(null);
 
   const initialElements = [];
   const [elements, setElements] = useState(initialElements);
@@ -355,8 +327,105 @@ export default function CertificateGenerator() {
     bgType, customBg, bgTransform, logoImg, globalData, signatories, awardees, csvHeaders, elements, projectName, canvasSize,
   }), [bgType, customBg, bgTransform, logoImg, globalData, signatories, awardees, csvHeaders, elements, projectName, canvasSize]);
 
-  const { pendingRestore, checkForRestore, applyRestore, discardRestore, formatAutosaveTime } = useAutosaveRestore();
-  const { lastSavedAt, isSaving, formatAutosaveTime: formatSaveTime } = useAutoSave(projectState, { enabled: isEditorLaunched && !showRestoreModal });
+  const { pendingRestore, checkForRestore, applyRestore, discardRestore, dismissRestorePrompt, formatAutosaveTime } = useAutosaveRestore();
+  const autosaveEnabled = isEditorLaunched && !pendingRestore;
+  const { lastSavedAt, isSaving, formatAutosaveTime: formatSaveTime, flushSave } = useAutoSave(projectState, { enabled: autosaveEnabled });
+  const { showMessage, showConfirm, messageDialog } = useMessageDialog();
+
+  const resetEditorWorkspaceState = () => {
+    const blankGlobalData = { orgName: '', orgSubtext: '', dateLine: '', certificateTitle: '', eventDuties: '', bodyTemplate: '' };
+    const blankAwardees = [{ id: '1', name: '', position: '', csvData: { Name: '', Position: '' }, hasCustomLayout: false, customElements: null, customSignatories: null }];
+    const blankSignatories = [
+      { id: 'sig_1', name: '', title: '', signatureImg: null },
+      { id: 'sig_2', name: '', title: '', signatureImg: null },
+    ];
+    setBgType('purpleGold');
+    setCustomBg(null);
+    setBgTransform({ width: 100, height: 100, x: 0, y: 0 });
+    setLogoImg(null);
+    setGlobalData(blankGlobalData);
+    setSignatories(blankSignatories);
+    setAwardees(blankAwardees);
+    setCsvHeaders(['Name', 'Position']);
+    setCurrentAwardeeIdx(0);
+    setProjectName('BatchCert_Project');
+    setCanvasSize({ width: 1100, height: 850, label: 'US Letter Landscape' });
+    setElements([]);
+    setHistory([{ elements: [], globalData: blankGlobalData, awardees: blankAwardees, signatories: blankSignatories }]);
+    setHistoryIndex(0);
+  };
+
+  const handleLaunchEditor = (withSample = false) => {
+    if (isLaunchingEditor || isReturningHome) return;
+    if (withSample) setLaunchWithSample(true);
+    setIsLaunchingEditor(true);
+    setIsReturningHome(false);
+    window.setTimeout(() => {
+      setIsEditorLaunched(true);
+      setIsLaunchingEditor(false);
+      if (withSample || launchWithSample) {
+        setPostLaunchAction('sample');
+        setLaunchWithSample(false);
+        return;
+      }
+
+      if (pendingFileProjectRef.current) {
+        const loadedState = pendingFileProjectRef.current;
+        pendingFileProjectRef.current = null;
+        dismissRestorePrompt();
+        applyProjectState(loadedState);
+        flushSave(loadedState);
+        return;
+      }
+
+      resetEditorWorkspaceState();
+      const saved = checkForRestore();
+      if (saved) return;
+
+      if (!isOnboardingComplete()) {
+        setPostLaunchAction('onboard');
+      }
+    }, 850);
+  };
+
+  const handleExitToHome = async () => {
+    if (isReturningHome || isLaunchingEditor) return;
+
+    const saveResult = flushSave();
+    const hasRecoverableWork = !isAutosaveEmpty(projectState);
+    const savedOk = saveResult.ok && !saveResult.cleared;
+
+    let title = 'Exit to Home?';
+    let message = 'Return to the home page?';
+    let variant = 'confirm';
+    let confirmLabel = 'Exit to Home';
+    let cancelLabel = 'Stay in Editor';
+
+    if (hasRecoverableWork && savedOk) {
+      message = 'Your project has been auto-saved and can be recovered when you launch the editor again.\n\nExit to home?';
+    } else if (hasRecoverableWork && !savedOk) {
+      title = 'Auto-save Unavailable';
+      message = 'Auto-save could not store your project in this browser. Use Save to download a backup before exiting.\n\nExit anyway?';
+      variant = 'warning';
+      confirmLabel = 'Exit Anyway';
+    }
+
+    const confirmed = await showConfirm({
+      title,
+      message,
+      variant,
+      confirmLabel,
+      cancelLabel,
+    });
+    if (!confirmed) return;
+
+    setIsReturningHome(true);
+    setIsLaunchingEditor(false);
+    window.setTimeout(() => {
+      setIsEditorLaunched(false);
+      setIsReturningHome(false);
+    }, 850);
+  };
 
   const applyProjectState = useMemo(() => getProjectAppliers({
     setBgType,
@@ -380,24 +449,96 @@ export default function CertificateGenerator() {
     if (postLaunchAction === 'sample') {
       applyProjectState(SAMPLE_PROJECT);
       markOnboardingComplete();
-    } else if (postLaunchAction === 'restore') {
-      checkForRestore();
-      setShowRestoreModal(true);
     } else if (postLaunchAction === 'onboard') {
       setShowOnboardingWizard(true);
     }
     setPostLaunchAction(null);
-  }, [isEditorLaunched, postLaunchAction, applyProjectState, checkForRestore]);
+  }, [isEditorLaunched, postLaunchAction, applyProjectState]);
 
   const handleRestoreProject = () => {
     applyRestore(applyProjectState);
-    setShowRestoreModal(false);
   };
 
   const handleDiscardRestore = () => {
     discardRestore();
-    setShowRestoreModal(false);
   };
+
+  const loadProjectFromParsedState = (parsed) => {
+    const loadedState = normalizeLoadedProjectState(parsed);
+    dismissRestorePrompt();
+    applyProjectState(loadedState);
+    const saveResult = flushSave(loadedState);
+    return { loadedState, saveResult };
+  };
+
+  const handleLoadProjectFromFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const { loadedState, saveResult } = loadProjectFromParsedState(JSON.parse(event.target.result));
+        if (!saveResult.ok && !saveResult.cleared) {
+          await showMessage({
+            title: 'Auto-save Unavailable',
+            message: 'Project loaded, but auto-save could not store it in this browser. Use Save to download a backup file.',
+            variant: 'warning',
+            confirmLabel: 'Got it',
+          });
+          return;
+        }
+        await showMessage({
+          title: 'Project Loaded',
+          message: `Project "${loadedState.projectName || 'Untitled project'}" loaded successfully from file.`,
+          variant: 'success',
+          confirmLabel: 'Continue',
+        });
+      } catch {
+        await showMessage({
+          title: 'Load Failed',
+          message: 'Failed to load project file. Invalid format.',
+          variant: 'error',
+          confirmLabel: 'OK',
+        });
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleOpenProjectFileFromLanding = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        pendingFileProjectRef.current = normalizeLoadedProjectState(JSON.parse(event.target.result));
+        handleLaunchEditor(false);
+      } catch {
+        await showMessage({
+          title: 'Load Failed',
+          message: 'Failed to load project file. Invalid format.',
+          variant: 'error',
+          confirmLabel: 'OK',
+        });
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const restoreProjectModal = (
+    <RestoreProjectModal
+      isOpen={!!pendingRestore}
+      savedAt={formatAutosaveTime(pendingRestore?.savedAt)}
+      projectName={pendingRestore?.projectName}
+      awardeeCount={pendingRestore?.awardees?.length || 0}
+      onRestore={handleRestoreProject}
+      onDiscard={handleDiscardRestore}
+    />
+  );
 
   const createHistorySnapshot = (nextElements = elements, nextGlobalData = globalData, nextAwardees = awardees, nextSignatories = signatories) => {
     const cleaned = deduplicateElements(nextElements);
@@ -897,23 +1038,6 @@ export default function CertificateGenerator() {
     link.click();
     URL.revokeObjectURL(url);
     alert(`Project "${projectName}" saved successfully!`);
-  };
-
-  const handleLoadProjectFromFile = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const state = JSON.parse(event.target.result);
-        applyProjectState(state);
-        alert('Project loaded successfully from file!');
-      } catch (err) {
-        alert('Failed to load project file. Invalid format.');
-      }
-    };
-    reader.readAsText(file);
   };
 
   const handleSaveLayoutTemplate = () => {
@@ -2048,6 +2172,7 @@ export default function CertificateGenerator() {
           onLaunchApp={() => handleLaunchEditor(false)}
           onLaunchWithSample={() => handleLaunchEditor(true)}
           onOpenDocs={() => setIsDocsModalOpen(true)}
+          onOpenProjectFile={handleOpenProjectFileFromLanding}
         />
         <DocsModal isOpen={isDocsModalOpen && !isEditorLaunched} onClose={() => setIsDocsModalOpen(false)} />
         <LoaderOverlay
@@ -2055,6 +2180,8 @@ export default function CertificateGenerator() {
           title="Launching Editor"
           description="Preparing your certificate workspace…"
         />
+        {restoreProjectModal}
+        {messageDialog}
       </>
     );
   }
@@ -2127,14 +2254,8 @@ export default function CertificateGenerator() {
         label={exportStatusLabel}
         onCancel={cancelExport}
       />
-      <RestoreProjectModal
-        isOpen={showRestoreModal && !!pendingRestore}
-        savedAt={formatAutosaveTime(pendingRestore?.savedAt)}
-        projectName={pendingRestore?.projectName}
-        awardeeCount={pendingRestore?.awardees?.length || 0}
-        onRestore={handleRestoreProject}
-        onDiscard={handleDiscardRestore}
-      />
+      {restoreProjectModal}
+      {messageDialog}
       <CsvImportModal
         isOpen={isCsvImportModalOpen}
         parsedCsv={parsedCsvDraft}
