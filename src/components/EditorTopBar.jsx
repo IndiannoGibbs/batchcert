@@ -1,5 +1,8 @@
 import React from 'react';
-import { FilePlus, FolderOpen, Save, HelpCircle } from 'lucide-react';
+import { FilePlus, FolderOpen, Save, HelpCircle, Cloud, BookOpen, Sparkles, ArrowLeft } from 'lucide-react';
+
+const toolbarBtn =
+  'shrink-0 whitespace-nowrap px-2 py-1 hover:bg-purple-50 text-zinc-700 rounded font-medium inline-flex items-center gap-1 transition text-xs';
 
 export default function EditorTopBar({
   handleExitToHome,
@@ -8,77 +11,83 @@ export default function EditorTopBar({
   handleSaveProject,
   projectName,
   setProjectName,
-  setIsKeyboardModalOpen
+  setIsKeyboardModalOpen,
+  autoSaveLabel,
+  autoSaveTitle,
+  onOpenDocs,
+  onOpenOnboarding,
 }) {
   return (
-    <div className="h-12 bg-white border-b border-purple-200 flex items-center justify-between px-4 z-30 shadow-sm">
-      <div className="flex items-center gap-4">
-        <button 
+    <div className="h-12 min-h-12 bg-white border-b border-purple-200 flex items-center gap-2 px-3 z-30 shadow-sm overflow-hidden">
+      {/* Left: exit + brand + file actions */}
+      <div className="flex items-center gap-2 min-w-0 shrink-0">
+        <button
           onClick={handleExitToHome}
-          className="text-xs font-extrabold text-purple-900 tracking-wider hover:underline flex items-center gap-1"
+          className={`${toolbarBtn} font-extrabold text-purple-900 tracking-wide`}
+          title="Exit to Home"
         >
-          ← Exit to Home
+          <ArrowLeft size={13} className="text-purple-700" />
+          Exit
         </button>
 
-        <span className="text-xs font-extrabold text-purple-900 tracking-wider flex items-center gap-1.5 uppercase">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 100" width="100%" height="100%" className="h-9 w-auto flex-shrink-0">
-            <defs>
-              <linearGradient id="purpleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="#9333ea" />
-                <stop offset="100%" stopColor="#581c87" />
-              </linearGradient>
-            </defs>
-            <g transform="translate(10, 15) scale(0.75)">
-              <rect x="12" y="12" width="64" height="64" rx="8" fill="#f3e8ff" opacity="0.6" />
-              <rect x="4" y="4" width="64" height="64" rx="8" fill="url(#purpleGradient)" />
-              <line x1="16" y1="20" x2="44" y2="20" stroke="#ffffff" strokeWidth="4" strokeLinecap="round" />
-              <line x1="16" y1="32" x2="56" y2="32" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" opacity="0.8" />
-              <line x1="16" y1="44" x2="36" y2="44" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" opacity="0.8" />
-              <circle cx="50" cy="50" r="14" fill="#ffffff" />
-              <path d="M44 50 L48 54 L57 44" fill="none" stroke="#581c87" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-            </g>
-            <text x="80" y="58" fontFamily="'Inter', 'Helvetica', sans-serif" fontSize="28" fontWeight="800" fill="#581c87" letterSpacing="-0.5">
-              Batch<tspan fontWeight="400" fill="#9333ea">Cert</tspan>
-            </text>
-          </svg>
-        </span>
+        <div className="h-5 w-px bg-purple-200 shrink-0" aria-hidden />
 
-        <div className="flex items-center gap-1 text-xs">
-          <button 
-            onClick={handleNewProject}
-            className="px-2.5 py-1.5 hover:bg-purple-50 text-zinc-700 rounded font-medium flex items-center gap-1 transition"
-          >
-            <FilePlus size={13} className="text-purple-600" /> New
+        <img src="/favicon.svg" alt="BatchCert" className="h-7 w-7 shrink-0" />
+
+        <div className="flex items-center gap-0.5 shrink-0">
+          <button onClick={onOpenOnboarding} className={toolbarBtn} title="Reopen setup wizard">
+            <Sparkles size={13} className="text-purple-600 shrink-0" />
+            Setup
           </button>
-
-          <label className="px-2.5 py-1.5 hover:bg-purple-50 text-zinc-700 rounded font-medium flex items-center gap-1 cursor-pointer transition">
-            <FolderOpen size={13} className="text-purple-600" /> Open
+          <button onClick={onOpenDocs} className={toolbarBtn} title="Open documentation">
+            <BookOpen size={13} className="text-purple-600 shrink-0" />
+            Docs
+          </button>
+          <button onClick={handleNewProject} className={toolbarBtn}>
+            <FilePlus size={13} className="text-purple-600 shrink-0" />
+            New
+          </button>
+          <label className={`${toolbarBtn} cursor-pointer`}>
+            <FolderOpen size={13} className="text-purple-600 shrink-0" />
+            Open
             <input type="file" accept=".json" onChange={handleLoadProjectFromFile} className="hidden" />
           </label>
-
-          <button 
-            onClick={handleSaveProject}
-            className="px-2.5 py-1.5 hover:bg-purple-50 text-zinc-700 rounded font-medium flex items-center gap-1 transition"
-          >
-            <Save size={13} className="text-purple-600" /> Save
+          <button onClick={handleSaveProject} className={toolbarBtn}>
+            <Save size={13} className="text-purple-600 shrink-0" />
+            Save
           </button>
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] text-zinc-500 font-medium">Project Name:</span>
-          <input 
-            type="text" 
-            value={projectName} 
+      {/* Spacer */}
+      <div className="flex-1 min-w-2" />
+
+      {/* Right: status + project name + help */}
+      <div className="flex items-center gap-2 shrink-0 min-w-0">
+        {autoSaveLabel && (
+          <span
+            title={autoSaveTitle || autoSaveLabel}
+            className="hidden lg:inline-flex shrink-0 whitespace-nowrap items-center gap-1 text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full font-medium leading-none"
+          >
+            <Cloud size={11} className="shrink-0" />
+            {autoSaveLabel}
+          </span>
+        )}
+
+        <div className="flex items-center gap-1.5 shrink min-w-0">
+          <span className="shrink-0 whitespace-nowrap text-[11px] text-zinc-500 font-medium">Project</span>
+          <input
+            type="text"
+            value={projectName}
             onChange={(e) => setProjectName(e.target.value)}
-            className="bg-purple-50/60 border border-purple-200 text-xs text-purple-950 font-semibold px-2.5 py-1 rounded focus:outline-none focus:border-purple-600 w-44 shadow-inner"
+            title={projectName}
+            className="min-w-0 w-28 sm:w-36 md:w-44 max-w-[11rem] sm:max-w-[14rem] md:max-w-none bg-purple-50/60 border border-purple-200 text-xs text-purple-950 font-semibold px-2 py-1 rounded focus:outline-none focus:border-purple-600 shadow-inner truncate"
           />
         </div>
 
         <button
           onClick={() => setIsKeyboardModalOpen(true)}
-          className="p-1.5 bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 rounded-full transition shadow-sm flex items-center justify-center"
+          className="shrink-0 p-1.5 bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 rounded-full transition shadow-sm flex items-center justify-center"
           title="Keyboard Shortcuts Cheat Sheet"
         >
           <HelpCircle size={16} className="text-purple-700" />

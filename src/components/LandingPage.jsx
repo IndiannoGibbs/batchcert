@@ -1,8 +1,8 @@
 // LandingPage.jsx
 import React from 'react';
-import { Download, QrCode, Layers, Sparkles, ArrowRight, Coffee } from 'lucide-react';
+import { Download, QrCode, Layers, Sparkles, ArrowRight, Coffee, BookOpen, FileSpreadsheet } from 'lucide-react';
 
-export default function LandingPage({ onLaunchApp }) {
+export default function LandingPage({ onLaunchApp, onLaunchWithSample, onOpenDocs }) {
   return (
     <div className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100 font-sans selection:bg-purple-500 selection:text-white">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.28),rgba(15,23,42,0))]" />
@@ -21,6 +21,12 @@ export default function LandingPage({ onLaunchApp }) {
           </div>
 
           <div className="flex items-center gap-3">
+            <button
+              onClick={onOpenDocs}
+              className="hidden md:inline-flex items-center gap-2 rounded-full border border-purple-500/20 bg-slate-900/70 px-3 py-2 text-xs font-semibold text-purple-200 transition hover:border-purple-400/40 hover:text-white"
+            >
+              <BookOpen size="14" className="text-purple-300" /> Docs
+            </button>
             <a href="https://ko-fi.com/indiannogibbs" target="_blank" rel="noopener noreferrer" className="hidden md:inline-flex items-center gap-2 rounded-full border border-purple-500/20 bg-slate-900/70 px-3 py-2 text-xs font-semibold text-purple-200 transition hover:border-purple-400/40 hover:text-white">
               <Coffee size="14" className="text-purple-300" /> Support
             </a>
@@ -58,12 +64,18 @@ export default function LandingPage({ onLaunchApp }) {
               >
                 Start Creating For Free <ArrowRight size="18" />
               </button>
-              <a 
-                href="#features"
+              <button
+                onClick={onLaunchWithSample}
+                className="inline-flex items-center justify-center rounded-full border border-purple-400/40 bg-purple-500/10 px-6 py-4 text-sm font-semibold text-purple-100 transition hover:bg-purple-500/20"
+              >
+                <FileSpreadsheet size="16" className="mr-2" /> Try Sample Project
+              </button>
+              <button
+                onClick={onOpenDocs}
                 className="inline-flex items-center justify-center rounded-full border border-purple-500/30 bg-white/5 px-6 py-4 text-sm font-semibold text-slate-100 transition hover:border-purple-400/40 hover:bg-slate-900"
               >
-                Explore Features
-              </a>
+                <BookOpen size="16" className="mr-2" /> Documentation
+              </button>
             </div>
             <div className="mt-8 flex justify-center">
               <a
@@ -102,8 +114,8 @@ export default function LandingPage({ onLaunchApp }) {
               <div className="flex h-12 w-12 items-center justify-center rounded-3xl bg-purple-500/15 text-purple-300 shadow-inner">
                 <QrCode size="22" />
               </div>
-              <h3 className="mt-5 text-xl font-semibold text-white">Dynamic QR Verification</h3>
-              <p className="mt-3 text-sm leading-7 text-slate-300">Link each certificate to a unique QR code and verification workflow for secure digital distribution.</p>
+              <h3 className="mt-5 text-xl font-semibold text-white">Local QR Codes</h3>
+              <p className="mt-3 text-sm leading-7 text-slate-300">Generate verification QR codes locally in your browser — no external API required, works offline in export.</p>
             </div>
 
             <div className="group rounded-2xl border border-purple-500/20 bg-slate-900/60 p-6 shadow-xl shadow-slate-950/20 backdrop-blur-md transition hover:border-purple-500/40 hover:-translate-y-1">
@@ -111,7 +123,7 @@ export default function LandingPage({ onLaunchApp }) {
                 <Download size="22" />
               </div>
               <h3 className="mt-5 text-xl font-semibold text-white">HD Print Export</h3>
-              <p className="mt-3 text-sm leading-7 text-slate-300">Choose draft, HD, or ultra-HD output for crisp certificates optimized for both print and digital delivery.</p>
+              <p className="mt-3 text-sm leading-7 text-slate-300">Export individual PDF ZIP archives or a single multi-page PDF at draft, HD, or ultra-HD quality.</p>
             </div>
           </div>
         </section>
@@ -120,26 +132,57 @@ export default function LandingPage({ onLaunchApp }) {
           <div className="mx-auto max-w-3xl text-center">
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-purple-300">Workflow</p>
             <h2 className="mt-4 text-3xl font-extrabold text-white sm:text-4xl">How BatchCert works</h2>
-            <p className="mt-4 text-slate-300 sm:text-lg">A three-step flow that turns CSV data into polished certificates—fast.</p>
+            <p className="mt-4 text-slate-300 sm:text-lg">A guided four-step flow that turns CSV data into polished certificates—fast.</p>
           </div>
 
-          <div className="mt-12 grid w-full grid-cols-1 gap-6 md:grid-cols-3">
+          <div className="mt-12 grid w-full grid-cols-1 gap-6 md:grid-cols-4">
             <div className="rounded-2xl border border-purple-500/20 bg-slate-900/60 p-6 text-center shadow-xl shadow-slate-950/20 backdrop-blur-md transition hover:border-purple-500/40 hover:-translate-y-1">
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-purple-600 text-white shadow-lg shadow-purple-600/20">1</div>
-              <h3 className="mt-5 text-xl font-semibold text-white">Import CSV Data</h3>
-              <p className="mt-3 text-sm leading-7 text-slate-300">Upload your attendee list and map dynamic fields like names, positions, and custom tags.</p>
+              <h3 className="mt-5 text-lg font-semibold text-white">Pick a Template</h3>
+              <p className="mt-3 text-sm leading-7 text-slate-300">Choose canvas size and background style, or start with the sample project.</p>
             </div>
 
             <div className="rounded-2xl border border-purple-500/20 bg-slate-900/60 p-6 text-center shadow-xl shadow-slate-950/20 backdrop-blur-md transition hover:border-purple-500/40 hover:-translate-y-1">
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-purple-600 text-white shadow-lg shadow-purple-600/20">2</div>
-              <h3 className="mt-5 text-xl font-semibold text-white">Design & Position</h3>
-              <p className="mt-3 text-sm leading-7 text-slate-300">Style your layout, add logos, and preview certificate fields in a live editor.</p>
+              <h3 className="mt-5 text-lg font-semibold text-white">Import CSV Data</h3>
+              <p className="mt-3 text-sm leading-7 text-slate-300">Upload your attendee list and map columns with built-in validation.</p>
             </div>
 
             <div className="rounded-2xl border border-purple-500/20 bg-slate-900/60 p-6 text-center shadow-xl shadow-slate-950/20 backdrop-blur-md transition hover:border-purple-500/40 hover:-translate-y-1">
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-purple-600 text-white shadow-lg shadow-purple-600/20">3</div>
-              <h3 className="mt-5 text-xl font-semibold text-white">Export ZIP Archive</h3>
-              <p className="mt-3 text-sm leading-7 text-slate-300">Download a ZIP of individual PDFs or PNGs for effortless sharing and printing.</p>
+              <h3 className="mt-5 text-lg font-semibold text-white">Design & Preview</h3>
+              <p className="mt-3 text-sm leading-7 text-slate-300">Style your layout, add logos, and preview each awardee in the live editor.</p>
+            </div>
+
+            <div className="rounded-2xl border border-purple-500/20 bg-slate-900/60 p-6 text-center shadow-xl shadow-slate-950/20 backdrop-blur-md transition hover:border-purple-500/40 hover:-translate-y-1">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-purple-600 text-white shadow-lg shadow-purple-600/20">4</div>
+              <h3 className="mt-5 text-lg font-semibold text-white">Export PDFs</h3>
+              <p className="mt-3 text-sm leading-7 text-slate-300">Download a ZIP of individual PDFs or one combined multi-page document.</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="docs" className="mt-20 rounded-[32px] border border-purple-500/10 bg-slate-900/70 px-8 py-12 shadow-2xl shadow-slate-950/30">
+          <div className="mx-auto max-w-3xl text-center">
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-purple-300">Documentation</p>
+            <h2 className="mt-4 text-3xl font-extrabold text-white sm:text-4xl">Everything you need to get started</h2>
+            <p className="mt-4 text-slate-300 sm:text-lg">
+              CSV format guides, print presets, and export troubleshooting — also available in-app via the Docs button.
+            </p>
+            <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
+              <button
+                onClick={onOpenDocs}
+                className="inline-flex items-center gap-2 rounded-full bg-purple-600 px-6 py-3 text-sm font-bold text-white hover:bg-purple-500 transition"
+              >
+                <BookOpen size="16" /> Open Documentation
+              </button>
+              <a
+                href="/sample-awardees.csv"
+                download
+                className="inline-flex items-center gap-2 rounded-full border border-purple-500/30 px-6 py-3 text-sm font-semibold text-purple-200 hover:text-white transition"
+              >
+                <FileSpreadsheet size="16" /> Download Sample CSV
+              </a>
             </div>
           </div>
         </section>
@@ -149,12 +192,20 @@ export default function LandingPage({ onLaunchApp }) {
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-purple-300">Ready to go live?</p>
             <h2 className="mt-4 text-3xl font-extrabold text-white sm:text-4xl">Launch BatchCert and automate your certificate workflow today.</h2>
             <p className="mt-4 text-slate-300 sm:text-lg">Perfect for course completions, awards, internal recognitions, and compliance training.</p>
-            <button 
-              onClick={onLaunchApp}
-              className="mt-10 inline-flex items-center justify-center rounded-full bg-white px-10 py-4 text-sm font-extrabold text-purple-950 shadow-xl shadow-purple-500/20 transition hover:bg-purple-50"
-            >
-              Launch BatchCert Editor Now
-            </button>
+            <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
+              <button 
+                onClick={onLaunchApp}
+                className="inline-flex items-center justify-center rounded-full bg-white px-10 py-4 text-sm font-extrabold text-purple-950 shadow-xl shadow-purple-500/20 transition hover:bg-purple-50"
+              >
+                Launch BatchCert Editor Now
+              </button>
+              <button
+                onClick={onLaunchWithSample}
+                className="inline-flex items-center justify-center rounded-full border border-purple-400/40 px-8 py-4 text-sm font-bold text-purple-100 hover:bg-purple-500/10 transition"
+              >
+                Try Sample Project First
+              </button>
+            </div>
           </div>
         </section>
       </main>

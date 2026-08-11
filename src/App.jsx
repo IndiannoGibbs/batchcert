@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Upload, Download, Plus, Trash2, ChevronLeft, ChevronRight, 
   Move, Type, Image as ImageIcon, Layout, Users, FileText, 
@@ -6,11 +6,8 @@ import {
   ZoomIn, ZoomOut, RotateCcw, CheckSquare, Undo2, SlidersHorizontal,
   Bold, Italic, Underline, FilePlus, FileCode, Award, PenTool,
   Layers, Eye, EyeOff, ArrowUp, ArrowDown, Check, X, Search, Maximize2, Minimize2, Grid,
-  Maximize, Info, Tag, FileType, QrCode, HelpCircle, Sparkles, ArrowRight, Coffee
+  Maximize, Info, Tag, FileType, QrCode, HelpCircle, Sparkles, ArrowRight, Coffee, Copy, Lock, Unlock, AlertTriangle
 } from 'lucide-react';
-import html2canvas from 'html2canvas';
-import { jsPDF } from 'jspdf';
-import JSZip from 'jszip';
 import LandingPage from './components/LandingPage';
 import LoaderOverlay from './components/LoaderOverlay';
 import EditorTopBar from './components/EditorTopBar';
@@ -18,99 +15,31 @@ import KeyboardShortcutModal from './components/KeyboardShortcutModal';
 import CSVInstructionsModal from './components/CSVInstructionsModal';
 import QRInstructionsModal from './components/QRInstructionsModal';
 import ExportModal from './components/ExportModal';
+import ExportProgressOverlay from './components/ExportProgressOverlay';
 import AwardeeDropdown from './components/AwardeeDropdown';
-
-// --- Curated Google Fonts Library ---
-const GOOGLE_FONTS = [
-  // Serif / Academic
-  { id: 'Cinzel', name: 'Cinzel', family: "'Cinzel', serif", category: 'Serif / Academic' },
-  { id: 'Playfair Display', name: 'Playfair Display', family: "'Playfair Display', serif", category: 'Serif / Academic' },
-  { id: 'Cormorant Garamond', name: 'Cormorant Garamond', family: "'Cormorant Garamond', serif", category: 'Serif / Academic' },
-  { id: 'Merriweather', name: 'Merriweather', family: "'Merriweather', serif", category: 'Serif / Academic' },
-  { id: 'Bodoni Moda', name: 'Bodoni Moda', family: "'Bodoni Moda', serif", category: 'Serif / Academic' },
-  
-  // Sans-Serif / Modern
-  { id: 'Inter', name: 'Inter', family: "'Inter', sans-serif", category: 'Sans-Serif / Modern' },
-  { id: 'Montserrat', name: 'Montserrat', family: "'Montserrat', sans-serif", category: 'Sans-Serif / Modern' },
-  { id: 'Poppins', name: 'Poppins', family: "'Poppins', sans-serif", category: 'Sans-Serif / Modern' },
-  { id: 'Roboto', name: 'Roboto', family: "'Roboto', sans-serif", category: 'Sans-Serif / Modern' },
-  { id: 'Oswald', name: 'Oswald', family: "'Oswald', sans-serif", category: 'Sans-Serif / Modern' },
-
-  // Calligraphy / Script
-  { id: 'Great Vibes', name: 'Great Vibes', family: "'Great Vibes', cursive", category: 'Calligraphy / Script' },
-  { id: 'Alex Brush', name: 'Alex Brush', family: "'Alex Brush', cursive", category: 'Calligraphy / Script' },
-  { id: 'Dancing Script', name: 'Dancing Script', family: "'Dancing Script', cursive", category: 'Calligraphy / Script' },
-  { id: 'Pinyon Script', name: 'Pinyon Script', family: "'Pinyon Script', cursive", category: 'Calligraphy / Script' },
-  { id: 'Allura', name: 'Allura', family: "'Allura', cursive", category: 'Calligraphy / Script' }
-];
-
-// --- Canvas Dimension Presets ---
-const CANVAS_PRESETS = [
-  { id: 'letter-landscape', name: 'US Letter Landscape', width: 1100, height: 850 },
-  { id: 'letter-portrait', name: 'US Letter Portrait', width: 850, height: 1100 },
-  { id: 'a4-landscape', name: 'A4 Landscape', width: 1123, height: 794 },
-  { id: 'a4-portrait', name: 'A4 Portrait', width: 794, height: 1123 },
-];
-
-// --- Preset Background Styles ---
-const PRESET_BACKGROUNDS = {
-  purpleGold: {
-    name: 'Royal Purple & Gold',
-    style: {
-      backgroundColor: '#ffffff',
-      borderLeft: '24px solid #581c87',
-      borderTop: '6px solid #d97706',
-      borderRight: '6px solid #581c87',
-      borderBottom: '6px solid #d97706'
-    }
-  },
-  gold: {
-    name: 'Gold Elegance',
-    style: {
-      background: 'linear-gradient(135deg, #fffdfa 0%, #fef8ec 100%)',
-      border: '14px double #d97706',
-      outline: '2px solid #b45309',
-      outlineOffset: '-10px'
-    }
-  },
-  classic: {
-    name: 'Academic Classic',
-    style: {
-      backgroundColor: '#ffffff',
-      border: '10px solid #581c87',
-      outline: '2px dashed #c084fc',
-      outlineOffset: '-14px'
-    }
-  },
-  modernMinimal: {
-    name: 'Modern Minimal',
-    style: {
-      backgroundColor: '#fafafa',
-      border: '1px solid #e4e4e7',
-      outline: '4px solid #f4f4f5',
-      outlineOffset: '-8px'
-    }
-  },
-  darkMode: {
-    name: 'Midnight Dark Mode',
-    style: {
-      backgroundColor: '#09090b',
-      border: '12px solid #27272a',
-      outline: '2px solid #d4d4d8',
-      outlineOffset: '-16px'
-    }
-  }
-};
-
-const deduplicateElements = (els) => {
-  const map = new Map();
-  (els || []).forEach(el => {
-    if (el.key === 'eventDuties') return;
-    const identifier = el.sigId && el.sigField ? `sig_${el.sigId}_${el.sigField}` : (el.key ? `key_${el.key}` : el.id);
-    map.set(identifier, el);
-  });
-  return Array.from(map.values());
-};
+import RestoreProjectModal from './components/RestoreProjectModal';
+import CsvImportModal from './components/CsvImportModal';
+import QRCodeElement from './components/QRCodeElement';
+import OnboardingWizard from './components/OnboardingWizard';
+import DocsModal from './components/DocsModal';
+import { GOOGLE_FONTS, CANVAS_PRESETS, PRESET_BACKGROUNDS } from './constants/index.js';
+import { SAMPLE_PROJECT } from './constants/sampleProject.js';
+import { deduplicateElements, getTextElementTransform } from './lib/elements.js';
+import { clearAutosaveProject, hasAutosaveProject, formatAutosaveTimeShort } from './lib/autosave.js';
+import {
+  parseCsvText,
+  guessDefaultMapping,
+  buildAwardeesFromCsv,
+  getCustomCsvHeaders,
+  extractDynamicHeadersFromElements,
+} from './lib/csv/parseCsv.js';
+import { getExportSummary } from './lib/export/pdfHelpers.js';
+import { estimateExport } from './lib/export/estimateExport.js';
+import { validateAwardees } from './lib/awardeeValidation.js';
+import { getProjectAppliers, buildProjectSnapshot } from './lib/projectState.js';
+import { useAutoSave, useAutosaveRestore } from './hooks/useAutoSave.js';
+import { useCertificateExport } from './hooks/useCertificateExport.js';
+import { isOnboardingComplete, markOnboardingComplete } from './lib/onboarding.js';
 
 export default function CertificateGenerator() {
   // Navigation state for Landing Page vs Editor
@@ -118,14 +47,41 @@ export default function CertificateGenerator() {
   const [isLaunchingEditor, setIsLaunchingEditor] = useState(false);
   const [isReturningHome, setIsReturningHome] = useState(false);
 
-  const handleLaunchEditor = () => {
+  const handleLaunchEditor = (withSample = false) => {
     if (isLaunchingEditor || isReturningHome) return;
+    if (withSample) setLaunchWithSample(true);
     setIsLaunchingEditor(true);
     setIsReturningHome(false);
     window.setTimeout(() => {
       setIsEditorLaunched(true);
       setIsLaunchingEditor(false);
+      if (withSample || launchWithSample) {
+        setPostLaunchAction('sample');
+        setLaunchWithSample(false);
+      } else if (hasAutosaveProject()) {
+        setPostLaunchAction('restore');
+      } else if (!isOnboardingComplete()) {
+        setPostLaunchAction('onboard');
+      }
     }, 850);
+  };
+
+  const handleCompleteOnboarding = () => {
+    markOnboardingComplete();
+    setShowOnboardingWizard(false);
+  };
+
+  const handleLoadSampleProject = () => {
+    applyProjectState(SAMPLE_PROJECT);
+  };
+
+  const handleOnboardingTemplate = ({ canvasSize: size, bgType: bg }) => {
+    setCanvasSize(size);
+    setBgType(bg);
+  };
+
+  const handleOnboardingCsvImport = ({ headers, rows, nameColumn, positionColumn }) => {
+    finalizeCsvImport({ headers, rows, nameColumn, positionColumn });
   };
 
   const handleExitToHome = () => {
@@ -205,6 +161,13 @@ export default function CertificateGenerator() {
   const [exportFormat, setExportFormat] = useState('pdf'); // 'pdf' | 'png'
   const [exportScale, setExportScale] = useState(2); // 1x draft, 2x HD, 3x Ultra HD
   const [selectedExportIndices, setSelectedExportIndices] = useState([]);
+  const [parsedCsvDraft, setParsedCsvDraft] = useState(null);
+  const [isCsvImportModalOpen, setIsCsvImportModalOpen] = useState(false);
+  const [showRestoreModal, setShowRestoreModal] = useState(false);
+  const [showOnboardingWizard, setShowOnboardingWizard] = useState(false);
+  const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
+  const [launchWithSample, setLaunchWithSample] = useState(false);
+  const [postLaunchAction, setPostLaunchAction] = useState(null);
 
   const initialElements = [];
   const [elements, setElements] = useState(initialElements);
@@ -357,46 +320,53 @@ export default function CertificateGenerator() {
     reader.readAsDataURL(file);
   };
 
-  useEffect(() => {
-    const saved = localStorage.getItem('batchcert_project_auto');
-    if (saved) {
-      try {
-        const state = JSON.parse(saved);
-        if (state.bgType) setBgType(state.bgType);
-        if (state.customBg !== undefined) setCustomBg(state.customBg);
-        if (state.bgTransform) setBgTransform(state.bgTransform);
-        if (state.logoImg !== undefined) setLogoImg(state.logoImg);
-        if (state.globalData) setGlobalData(state.globalData);
-        if (state.signatories) setSignatories(state.signatories);
-        if (state.awardees) setAwardees(state.awardees);
-        if (state.csvHeaders) setCsvHeaders(state.csvHeaders);
-        if (state.projectName) setProjectName(state.projectName);
-        if (state.canvasSize) setCanvasSize(state.canvasSize);
-        if (state.elements) {
-          const cleaned = deduplicateElements(state.elements);
-          setElements(cleaned);
-          setHistory([{
-            elements: cleaned,
-            globalData: state.globalData !== undefined ? state.globalData : globalData,
-            awardees: state.awardees !== undefined ? state.awardees : awardees,
-            signatories: state.signatories !== undefined ? state.signatories : signatories
-          }]);
-          setHistoryIndex(0);
-        }
-      } catch (err) {
-        console.error('Failed to load auto-saved project', err);
-      }
-    }
-  }, []);
+  const projectState = useMemo(() => buildProjectSnapshot({
+    bgType, customBg, bgTransform, logoImg, globalData, signatories, awardees, csvHeaders, elements, projectName, canvasSize,
+  }), [bgType, customBg, bgTransform, logoImg, globalData, signatories, awardees, csvHeaders, elements, projectName, canvasSize]);
+
+  const { pendingRestore, checkForRestore, applyRestore, discardRestore, formatAutosaveTime } = useAutosaveRestore();
+  const { lastSavedAt, isSaving, formatAutosaveTime: formatSaveTime } = useAutoSave(projectState, { enabled: isEditorLaunched && !showRestoreModal });
+
+  const applyProjectState = useMemo(() => getProjectAppliers({
+    setBgType,
+    setCustomBg,
+    setBgTransform,
+    setLogoImg,
+    setGlobalData,
+    setSignatories,
+    setAwardees,
+    setCsvHeaders,
+    setProjectName,
+    setCanvasSize,
+    setElements,
+    setHistory,
+    setHistoryIndex,
+    fallbacks: { globalData, awardees, signatories },
+  }), [globalData, awardees, signatories]);
 
   useEffect(() => {
-    try {
-      const projectState = { bgType, customBg, bgTransform, logoImg, globalData, signatories, awardees, csvHeaders, elements, projectName, canvasSize };
-      localStorage.setItem('batchcert_project_auto', JSON.stringify(projectState));
-    } catch (err) {
-      console.warn('LocalStorage quota exceeded.', err);
+    if (!isEditorLaunched || !postLaunchAction) return;
+    if (postLaunchAction === 'sample') {
+      applyProjectState(SAMPLE_PROJECT);
+      markOnboardingComplete();
+    } else if (postLaunchAction === 'restore') {
+      checkForRestore();
+      setShowRestoreModal(true);
+    } else if (postLaunchAction === 'onboard') {
+      setShowOnboardingWizard(true);
     }
-  }, [bgType, customBg, bgTransform, logoImg, globalData, signatories, awardees, csvHeaders, elements, projectName, canvasSize]);
+    setPostLaunchAction(null);
+  }, [isEditorLaunched, postLaunchAction, applyProjectState, checkForRestore]);
+
+  const handleRestoreProject = () => {
+    applyRestore(applyProjectState);
+    setShowRestoreModal(false);
+  };
+
+  const handleDiscardRestore = () => {
+    discardRestore();
+    setShowRestoreModal(false);
+  };
 
   const createHistorySnapshot = (nextElements = elements, nextGlobalData = globalData, nextAwardees = awardees, nextSignatories = signatories) => {
     const cleaned = deduplicateElements(nextElements);
@@ -515,13 +485,45 @@ export default function CertificateGenerator() {
     }, 0);
   }, [editingElementId]);
 
-  const [isExporting, setIsExporting] = useState(false);
-  const [exportProgress, setExportProgress] = useState(0);
-
   const [canvasScale, setCanvasScale] = useState(1);
   const [zoomMultiplier, setZoomMultiplier] = useState(1);
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
+
+  const {
+    isExporting,
+    exportProgress,
+    exportStatusLabel,
+    executeBatchZipExport,
+    exportAllToSinglePDF,
+    exportTestPdf,
+    cancelExport,
+  } = useCertificateExport({
+    canvasRef,
+    canvasSize,
+    exportScale,
+    awardees,
+    projectName,
+    currentAwardeeIdx,
+    setCurrentAwardeeIdx,
+    setSelectedIds,
+  });
+
+  const exportSummary = useMemo(() => getExportSummary({
+    canvasSize,
+    awardeeCount: exportMode === 'all' ? awardees.length : selectedExportIndices.length,
+    exportScale,
+    exportFormat,
+  }), [canvasSize, exportMode, awardees.length, selectedExportIndices.length, exportScale, exportFormat]);
+
+  const exportEstimate = useMemo(() => estimateExport({
+    count: exportMode === 'all' ? awardees.length : selectedExportIndices.length,
+    canvasSize,
+    exportScale,
+    exportFormat,
+  }), [canvasSize, exportMode, awardees.length, selectedExportIndices.length, exportScale, exportFormat]);
+
+  const awardeeValidation = useMemo(() => validateAwardees(awardees), [awardees]);
 
   useEffect(() => {
     const updateScale = () => {
@@ -723,7 +725,7 @@ export default function CertificateGenerator() {
       setProjectName('Blank_BatchCert_Project');
       setCustomBg(null);
       setLogoImg(null);
-      localStorage.removeItem('batchcert_project_auto');
+      clearAutosaveProject();
     }
   };
 
@@ -747,27 +749,7 @@ export default function CertificateGenerator() {
     reader.onload = (event) => {
       try {
         const state = JSON.parse(event.target.result);
-        if (state.bgType) setBgType(state.bgType);
-        if (state.customBg !== undefined) setCustomBg(state.customBg);
-        if (state.bgTransform) setBgTransform(state.bgTransform);
-        if (state.logoImg !== undefined) setLogoImg(state.logoImg);
-        if (state.globalData) setGlobalData(state.globalData);
-        if (state.signatories) setSignatories(state.signatories);
-        if (state.awardees) setAwardees(state.awardees);
-        if (state.csvHeaders) setCsvHeaders(state.csvHeaders);
-        if (state.projectName) setProjectName(state.projectName);
-        if (state.canvasSize) setCanvasSize(state.canvasSize);
-        if (state.elements) {
-          const cleaned = deduplicateElements(state.elements);
-          setElements(cleaned);
-          setHistory([{
-            elements: cleaned,
-            globalData: state.globalData !== undefined ? state.globalData : globalData,
-            awardees: state.awardees !== undefined ? state.awardees : awardees,
-            signatories: state.signatories !== undefined ? state.signatories : signatories
-          }]);
-          setHistoryIndex(0);
-        }
+        applyProjectState(state);
         alert('Project loaded successfully from file!');
       } catch (err) {
         alert('Failed to load project file. Invalid format.');
@@ -834,6 +816,20 @@ export default function CertificateGenerator() {
     pushHistory(updated);
   };
 
+  const normalizeQrTemplate = (data) =>
+    String(data || '').replace(/(\{\{\s*[^}]+\s*\}\})(?:\s*\1)+/gi, '$1');
+
+  const updateSelectedElementLive = (key, value) => {
+    const activeId = selectedIds[selectedIds.length - 1];
+    if (!activeId) return;
+    const updated = activeElements.map(el => el.id === activeId ? { ...el, [key]: value } : el);
+    if (currentAwardee.hasCustomLayout) {
+      setAwardees(prev => prev.map((a, idx) => idx === currentAwardeeIdx ? { ...a, customElements: updated } : a));
+    } else {
+      setElements(updated);
+    }
+  };
+
   const handleTextAlign = (alignValue) => {
     if (selectedIds.length !== 1) return;
     const el = activeElements.find(e => e.id === selectedIds[selectedIds.length - 1]);
@@ -841,13 +837,6 @@ export default function CertificateGenerator() {
     updateSelectedElement('align', alignValue);
   };
 
-  const getTextElementTransform = (el) => {
-    if (el.type === 'logo' || el.align === 'center') return 'translateX(-50%)';
-    if (el.type === 'text' && el.align === 'right') return 'translateX(-100%)';
-    return 'none';
-  };
-
-  // Group Deletion / Single Deletion support
   const deleteSelectedElements = () => {
     if (selectedIds.length === 0) return;
 
@@ -945,6 +934,55 @@ export default function CertificateGenerator() {
     setSelectedIds([]);
   };
 
+  const duplicateSelectedElements = () => {
+    if (selectedIds.length === 0) return;
+    const toDuplicate = activeElements.filter(el => selectedIds.includes(el.id));
+    const duplicated = toDuplicate.map((el, idx) => ({
+      ...JSON.parse(JSON.stringify(el)),
+      id: `${el.type}_dup_${Date.now()}_${idx}`,
+      x: Math.min(96, el.x + 3),
+      y: Math.min(96, el.y + 3),
+      locked: false,
+    }));
+    const updated = [...activeElements, ...duplicated];
+    pushHistory(updated);
+    setSelectedIds(duplicated.map(el => el.id));
+  };
+
+  const toggleLockSelected = () => {
+    if (selectedIds.length === 0) return;
+    const anyUnlocked = activeElements.some(el => selectedIds.includes(el.id) && !el.locked);
+    const updated = activeElements.map(el =>
+      selectedIds.includes(el.id) ? { ...el, locked: anyUnlocked } : el
+    );
+    pushHistory(updated);
+  };
+
+  const exportAwardeesCsv = () => {
+    const escapeCell = (value) => {
+      const text = String(value ?? '');
+      if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+      return text;
+    };
+
+    const rows = awardees.map((awardee) =>
+      csvHeaders.map((header) => {
+        if (header === 'Name') return escapeCell(awardee.name);
+        if (header === 'Position') return escapeCell(awardee.position);
+        return escapeCell(awardee.csvData?.[header] ?? '');
+      }).join(',')
+    );
+
+    const csvContent = [csvHeaders.map(escapeCell).join(','), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${projectName || 'BatchCert'}_awardees.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const primarySelectedElement = activeElements.find(el => el.id === selectedIds[selectedIds.length - 1]);
 
   const addTextElement = () => {
@@ -995,7 +1033,7 @@ export default function CertificateGenerator() {
       x: 85,
       y: 78,
       size: 90,
-      data: 'https://batchcert.verify/cert/{{Name}}',
+      data: 'https://batchcert.verify/cert/',
       visible: true
     };
     const updated = [...activeElements, newEl];
@@ -1005,11 +1043,18 @@ export default function CertificateGenerator() {
 
   const insertTagIntoCanvas = (tagName) => {
     const tagPlaceholder = `{{${tagName}}}`;
+    const tagAlreadyPresent = (text) => {
+      const pattern = new RegExp(`\\{\\{\\s*${tagName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\}\\}`, 'i');
+      return pattern.test(text || '');
+    };
+
     if (selectedIds.length === 1 && primarySelectedElement && primarySelectedElement.type === 'text') {
       const currentText = primarySelectedElement.text || '';
+      if (tagAlreadyPresent(currentText)) return;
       updateSelectedElement('text', `${currentText} ${tagPlaceholder}`.trim());
     } else if (selectedIds.length === 1 && primarySelectedElement && primarySelectedElement.type === 'qrcode') {
       const currentData = primarySelectedElement.data || '';
+      if (tagAlreadyPresent(currentData)) return;
       updateSelectedElement('data', `${currentData}${tagPlaceholder}`.trim());
     } else {
       const newEl = {
@@ -1097,6 +1142,12 @@ export default function CertificateGenerator() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'u') {
         e.preventDefault();
         applyTextFormat('underline');
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        duplicateSelectedElements();
         return;
       }
 
@@ -1266,8 +1317,9 @@ export default function CertificateGenerator() {
   };
 
   const handleElementPointerDown = (e, id) => {
-    if (editingElementId === id) return; 
+    if (editingElementId === id) return;
     e.stopPropagation();
+    const targetEl = activeElements.find(el => el.id === id);
     let newSelectedIds = [...selectedIds];
 
     if (e.shiftKey) {
@@ -1278,6 +1330,9 @@ export default function CertificateGenerator() {
     }
 
     setSelectedIds(newSelectedIds);
+
+    if (targetEl?.locked) return;
+
     setIsDragging(true);
 
     if (canvasRef.current) {
@@ -1374,6 +1429,8 @@ export default function CertificateGenerator() {
     // Multi-element group dragging support
     const updated = activeElements.map(el => {
       if (selectedIds.includes(el.id) && dragStartRef.current.initialPositions[el.id]) {
+        if (el.locked) return el;
+
         const init = dragStartRef.current.initialPositions[el.id];
         let newX = init.x + deltaX;
         let newY = init.y + deltaY;
@@ -1386,6 +1443,23 @@ export default function CertificateGenerator() {
           if (Math.abs(newY - 50) < 1.0) {
             newY = 50;
             isNearCenterY = true;
+          }
+
+          if (showGuides) {
+            for (const gx of guides.vertical) {
+              if (Math.abs(newX - gx) < 1.0) {
+                newX = gx;
+                isNearCenterX = true;
+                break;
+              }
+            }
+            for (const gy of guides.horizontal) {
+              if (Math.abs(newY - gy) < 1.0) {
+                newY = gy;
+                isNearCenterY = true;
+                break;
+              }
+            }
           }
         }
 
@@ -1502,163 +1576,123 @@ export default function CertificateGenerator() {
     }
   };
 
+  const finalizeCsvImport = ({ headers, rows, nameColumn, positionColumn }) => {
+    const parsed = buildAwardeesFromCsv({ rows, nameColumn, positionColumn });
+    if (parsed.length === 0) {
+      alert('No valid rows found in CSV.');
+      return;
+    }
+
+    setCsvHeaders(headers);
+
+    const awardeeNameMissing = !activeElements.some(el => el.key === 'awardeeName');
+    const awardeePositionMissing = !activeElements.some(el => el.key === 'awardeePosition');
+    const existingDynamicHeaders = extractDynamicHeadersFromElements(activeElements);
+    const customHeaders = getCustomCsvHeaders(headers, existingDynamicHeaders);
+
+    const customElements = customHeaders.map((header, idx) => ({
+      id: `field_csv_${Date.now()}_${idx}`,
+      type: 'text',
+      text: `{{${header}}}`,
+      label: header,
+      x: 50,
+      y: 58 + idx * 8,
+      font: 'Inter',
+      fontSize: 20,
+      color: '#1f2937',
+      bold: false,
+      italic: false,
+      underline: false,
+      align: 'center',
+      maxWidth: 80,
+      visible: true,
+    }));
+
+    const placeholderElements = [];
+    if (awardeeNameMissing) {
+      placeholderElements.push({
+        id: `field_awardeeName_${Date.now()}`,
+        type: 'text',
+        key: 'awardeeName',
+        label: 'Awardee Name',
+        text: '',
+        x: 50,
+        y: 30,
+        font: 'Cinzel',
+        fontSize: 32,
+        color: '#1f2937',
+        bold: true,
+        italic: false,
+        underline: false,
+        align: 'center',
+        maxWidth: 80,
+        visible: true,
+      });
+    }
+
+    if (awardeePositionMissing) {
+      placeholderElements.push({
+        id: `field_awardeePosition_${Date.now()}`,
+        type: 'text',
+        key: 'awardeePosition',
+        label: 'Awardee Position',
+        text: '',
+        x: 50,
+        y: 40,
+        font: 'Montserrat',
+        fontSize: 20,
+        color: '#1f2937',
+        bold: true,
+        italic: false,
+        underline: false,
+        align: 'center',
+        maxWidth: 80,
+        visible: true,
+      });
+    }
+
+    setAwardees(parsed);
+    setCurrentAwardeeIdx(0);
+
+    if (placeholderElements.length || customElements.length) {
+      const allNewElements = [...placeholderElements, ...customElements];
+      if (currentAwardee.hasCustomLayout) {
+        setAwardees(prev => prev.map((a, idx) => {
+          if (idx !== currentAwardeeIdx) return a;
+          return { ...a, customElements: [...(a.customElements || []), ...allNewElements] };
+        }));
+      } else {
+        pushHistory([...activeElements, ...allNewElements]);
+      }
+    }
+
+    alert(`Successfully imported ${parsed.length} awardees with ${headers.length} dynamic column fields (${headers.join(', ')})!`);
+  };
+
   const handleCSVImport = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    e.target.value = '';
 
     const reader = new FileReader();
     reader.onload = (evt) => {
-      const text = evt.target.result;
-      const lines = text.split(/\r\n|\n/).filter(l => l.trim() !== '');
-      if (lines.length < 2) {
-        alert('CSV file must contain a header row and at least one data row.');
+      const parsed = parseCsvText(evt.target.result);
+      if (parsed.error) {
+        alert(parsed.error);
         return;
       }
 
-      const parseRow = (line) => {
-        const rawParts = line.match(/(".*?"|[^",]+)(?=\s*,|\s*$)/g) || line.split(',');
-        return rawParts.map(s => s.trim().replace(/^["']+|["']+$/g, '').replace(/""/g, '"'));
-      };
-
-      const headers = parseRow(lines[0]);
-      const normalizeHeader = (value) => value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-      const normalizedHeaders = headers.map(normalizeHeader);
-      setCsvHeaders(headers);
-
-      const findHeaderIndex = (variants) => {
-        const normalizedVariants = variants.map(normalizeHeader);
-        return normalizedHeaders.findIndex(h => normalizedVariants.includes(h));
-      };
-
-      const parsed = lines.slice(1).map((line, idx) => {
-        const parts = parseRow(line);
-        const rowData = {};
-        headers.forEach((h, hIdx) => {
-          rowData[h] = parts[hIdx] || '';
-        });
-
-        const nameIdx = findHeaderIndex(['Name', 'name', 'Awardee Name', 'awardee name', 'awardee_name']);
-        const posIdx = findHeaderIndex(['Position', 'position', 'Title', 'title', 'Awardee Position', 'awardee position', 'awardee_position']);
-
-        const nameVal = nameIdx !== -1 ? parts[nameIdx] : (parts[0] || '');
-        const posVal = posIdx !== -1 ? parts[posIdx] : (parts[1] || '');
-
-        return {
-          id: String(Date.now() + idx),
-          name: nameVal,
-          position: posVal,
-          csvData: rowData,
-          hasCustomLayout: false,
-          customElements: null,
-          customSignatories: null
-        };
-      }).filter(item => item.name !== '' || item.position !== '' || Object.values(item.csvData || {}).some(v => v !== ''));
-
-      if (parsed.length > 0) {
-        const awardeeNameMissing = !activeElements.some(el => el.key === 'awardeeName');
-        const awardeePositionMissing = !activeElements.some(el => el.key === 'awardeePosition');
-        const existingDynamicHeaders = new Set(activeElements.reduce((acc, el) => {
-          if (typeof el.text !== 'string') return acc;
-          const matches = Array.from(el.text.matchAll(/\{\{\s*([^}]+)\s*\}\}/g));
-          matches.forEach(match => {
-            if (match[1]) acc.add(match[1].trim().toLowerCase());
-          });
-          return acc;
-        }, []));
-
-        const builtInHeaderVariants = new Set([
-          'name', 'awardee name', 'awardee_name',
-          'position', 'awardee position', 'awardee_position',
-          'title'
-        ]);
-
-        const customHeaders = headers.filter((header) => {
-          const normalized = header.trim().toLowerCase();
-          return normalized && !builtInHeaderVariants.has(normalized) && !existingDynamicHeaders.has(normalized);
-        });
-
-        const customElements = customHeaders.map((header, idx) => ({
-          id: `field_csv_${Date.now()}_${idx}`,
-          type: 'text',
-          text: `{{${header}}}`,
-          label: header,
-          x: 50,
-          y: 58 + idx * 8,
-          font: 'Inter',
-          fontSize: 20,
-          color: '#1f2937',
-          bold: false,
-          italic: false,
-          underline: false,
-          align: 'center',
-          maxWidth: 80,
-          visible: true
-        }));
-
-        const placeholderElements = [];
-        if (awardeeNameMissing) {
-          placeholderElements.push({
-            id: `field_awardeeName_${Date.now()}`,
-            type: 'text',
-            key: 'awardeeName',
-            label: 'Awardee Name',
-            text: '',
-            x: 50,
-            y: 30,
-            font: 'Cinzel',
-            fontSize: 32,
-            color: '#1f2937',
-            bold: true,
-            italic: false,
-            underline: false,
-            align: 'center',
-            maxWidth: 80,
-            visible: true
-          });
-        }
-
-        if (awardeePositionMissing) {
-          placeholderElements.push({
-            id: `field_awardeePosition_${Date.now()}`,
-            type: 'text',
-            key: 'awardeePosition',
-            label: 'Awardee Position',
-            text: '',
-            x: 50,
-            y: 40,
-            font: 'Montserrat',
-            fontSize: 20,
-            color: '#1f2937',
-            bold: true,
-            italic: false,
-            underline: false,
-            align: 'center',
-            maxWidth: 80,
-            visible: true
-          });
-        }
-
-        setAwardees(parsed);
-        setCurrentAwardeeIdx(0);
-
-        if (placeholderElements.length || customElements.length) {
-          const allNewElements = [...placeholderElements, ...customElements];
-          if (currentAwardee.hasCustomLayout) {
-            setAwardees(prev => prev.map((a, idx) => {
-              if (idx !== currentAwardeeIdx) return a;
-              return { ...a, customElements: [...(a.customElements || []), ...allNewElements] };
-            }));
-          } else {
-            pushHistory([...activeElements, ...allNewElements]);
-          }
-        }
-
-        alert(`Successfully imported ${parsed.length} awardees with ${headers.length} dynamic column fields (${headers.join(', ')})!`);
-      } else {
-        alert('No valid rows found in CSV.');
-      }
+      const defaultMapping = guessDefaultMapping(parsed.headers, parsed.normalizedHeaders);
+      setParsedCsvDraft({ ...parsed, defaultMapping });
+      setIsCsvImportModalOpen(true);
     };
     reader.readAsText(file);
+  };
+
+  const handleCsvImportConfirm = ({ headers, rows, nameColumn, positionColumn }) => {
+    finalizeCsvImport({ headers, rows, nameColumn, positionColumn });
+    setIsCsvImportModalOpen(false);
+    setParsedCsvDraft(null);
   };
 
   const openExportModal = () => {
@@ -1667,197 +1701,42 @@ export default function CertificateGenerator() {
     setIsExportModalOpen(true);
   };
 
-  const waitForCanvasRender = () =>
-    new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 80))));
+  const handleBatchZipExport = () => executeBatchZipExport({
+    exportMode,
+    selectedExportIndices,
+    exportFormat,
+    onCloseModal: () => setIsExportModalOpen(false),
+  });
 
-  const getPdfOrientation = (pageWidth, pageHeight) =>
-    pageWidth >= pageHeight ? 'landscape' : 'portrait';
+  const handleSinglePdfExport = () => exportAllToSinglePDF({
+    exportMode,
+    selectedExportIndices,
+    onCloseModal: () => setIsExportModalOpen(false),
+  });
 
-  const createCertificatePdf = (pageWidth, pageHeight) =>
-    new jsPDF({
-      orientation: getPdfOrientation(pageWidth, pageHeight),
-      unit: 'px',
-      format: [pageWidth, pageHeight],
-    });
-
-  const addCertificatePdfPage = (pdf, pageWidth, pageHeight) => {
-    pdf.addPage([pageWidth, pageHeight], getPdfOrientation(pageWidth, pageHeight));
+  const awardeeMatchesQuery = (awardee, query) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return (awardee.name || '').toLowerCase().includes(q)
+      || (awardee.position || '').toLowerCase().includes(q);
   };
 
-  const addCertificatePdfImage = (pdf, imgData) => {
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = pdf.internal.pageSize.getHeight();
-    pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+  const jumpToAwardee = (idx) => {
+    setCurrentAwardeeIdx(idx);
+    setSidebarPage(Math.floor(idx / itemsPerPage));
   };
 
-  const captureCanvasForExport = async () => {
-    const canvasElement = canvasRef.current;
-    if (!canvasElement) return null;
-
-    const renderScale = Number(exportScale);
-    const pageWidth = canvasSize.width;
-    const pageHeight = canvasSize.height;
-
-    const sandbox = document.createElement('div');
-    sandbox.setAttribute('aria-hidden', 'true');
-    sandbox.style.cssText = [
-      'position: fixed',
-      'left: -99999px',
-      'top: 0',
-      `width: ${pageWidth}px`,
-      `height: ${pageHeight}px`,
-      'overflow: visible',
-      'pointer-events: none',
-      'opacity: 0',
-      'z-index: -1',
-    ].join(';');
-
-    const clone = canvasElement.cloneNode(true);
-    clone.style.transform = 'none';
-    clone.style.transformOrigin = 'top left';
-    clone.style.width = `${pageWidth}px`;
-    clone.style.height = `${pageHeight}px`;
-    clone.style.position = 'relative';
-    clone.style.left = '0';
-    clone.style.top = '0';
-    clone.style.margin = '0';
-    clone.style.boxShadow = 'none';
-
-    sandbox.appendChild(clone);
-    document.body.appendChild(sandbox);
-
-    try {
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-      const renderedCanvas = await html2canvas(clone, {
-        scale: renderScale,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff',
-      });
-
-      return {
-        renderedCanvas,
-        imgData: renderedCanvas.toDataURL('image/jpeg', 0.92),
-        pageWidth,
-        pageHeight,
-      };
-    } finally {
-      sandbox.remove();
-    }
-  };
-
-  const executeBatchZipExport = async () => {
-    if (!canvasRef.current) return;
-    setIsExportModalOpen(false);
-    setIsExporting(true);
-    setSelectedIds([]);
-
-    if (document.fonts && document.fonts.ready) {
-      await document.fonts.ready;
-    }
-    await waitForCanvasRender();
-
-    const zip = new JSZip();
-    const indicesToExport = exportMode === 'all' 
-      ? awardees.map((_, idx) => idx) 
-      : selectedExportIndices;
-
-    const total = indicesToExport.length;
-    const chunkSize = 10;
-
-    for (let i = 0; i < total; i++) {
-      const awardeeIdx = indicesToExport[i];
-      setCurrentAwardeeIdx(awardeeIdx);
-      setExportProgress(Math.round(((i + 1) / total) * 100));
-
-      await waitForCanvasRender();
-
-      const capture = await captureCanvasForExport();
-      if (!capture) continue;
-
-      const awardeeObj = awardees[awardeeIdx];
-      const safeName = (awardeeObj.name || `Awardee_${awardeeIdx + 1}`).replace(/[^a-zA-Z0-9]/g, '_');
-
-      if (exportFormat === 'pdf') {
-        const pdf = createCertificatePdf(capture.pageWidth, capture.pageHeight);
-        addCertificatePdfImage(pdf, capture.imgData);
-        const pdfBlob = pdf.output('blob');
-        zip.file(`BatchCert_${awardeeIdx + 1}_${safeName}.pdf`, pdfBlob);
-      } else {
-        const pngBlob = await new Promise((resolve) => capture.renderedCanvas.toBlob(resolve, 'image/png'));
-        zip.file(`BatchCert_${awardeeIdx + 1}_${safeName}.png`, pngBlob);
-      }
-
-      capture.renderedCanvas.width = 0;
-      capture.renderedCanvas.height = 0;
-
-      if ((i + 1) % chunkSize === 0) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-    }
-
-    const content = await zip.generateAsync({ type: 'blob' });
-    const url = URL.createObjectURL(content);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${projectName || 'BatchCert_Archive'}_${exportFormat.toUpperCase()}.zip`;
-    link.click();
-    URL.revokeObjectURL(url);
-
-    setIsExporting(false);
-    setExportProgress(0);
-  };
-
-  const exportAllToSinglePDF = async () => {
-    if (!canvasRef.current || awardees.length === 0) return;
-
-    const initialIdx = currentAwardeeIdx;
-    setIsExporting(true);
-    setSelectedIds([]);
-
-    if (document.fonts && document.fonts.ready) {
-      await document.fonts.ready;
-    }
-    await waitForCanvasRender();
-
-    let pdf = null;
-
-    for (let i = 0; i < awardees.length; i++) {
-      setCurrentAwardeeIdx(i);
-      setExportProgress(Math.round(((i + 1) / awardees.length) * 100));
-
-      await waitForCanvasRender();
-
-      const capture = await captureCanvasForExport();
-      if (!capture) continue;
-
-      if (i === 0) {
-        pdf = createCertificatePdf(capture.pageWidth, capture.pageHeight);
-      } else {
-        addCertificatePdfPage(pdf, capture.pageWidth, capture.pageHeight);
-      }
-      addCertificatePdfImage(pdf, capture.imgData);
-
-      capture.renderedCanvas.width = 0;
-      capture.renderedCanvas.height = 0;
-    }
-
-    if (pdf) {
-      pdf.save('batch_certificates_all.pdf');
-    }
-    setCurrentAwardeeIdx(initialIdx);
-    setIsExporting(false);
-    setExportProgress(0);
-  };
-
-  // Filtered and paginated awardees for sidebar list
-  const filteredSidebarAwardees = awardees
+  const sidebarSearchMatches = awardees
     .map((a, idx) => ({ ...a, originalIdx: idx }))
-    .filter(a => (a.name || '').toLowerCase().includes(sidebarSearchQuery.toLowerCase()) || (a.position || '').toLowerCase().includes(sidebarSearchQuery.toLowerCase()));
+    .filter(a => awardeeMatchesQuery(a, sidebarSearchQuery));
 
-  const totalSidebarPages = Math.ceil(filteredSidebarAwardees.length / itemsPerPage);
-  const paginatedSidebarAwardees = filteredSidebarAwardees.slice(sidebarPage * itemsPerPage, (sidebarPage + 1) * itemsPerPage);
+  const paginatedSidebarAwardees = awardees
+    .map((a, idx) => ({ ...a, originalIdx: idx }))
+    .slice(sidebarPage * itemsPerPage, (sidebarPage + 1) * itemsPerPage);
+
+  const totalSidebarPages = Math.ceil(awardees.length / itemsPerPage);
+  const sidebarPageStart = awardees.length === 0 ? 0 : sidebarPage * itemsPerPage + 1;
+  const sidebarPageEnd = Math.min((sidebarPage + 1) * itemsPerPage, awardees.length);
 
   // ==========================================
   // LANDING PAGE VIEW (Before Editor Launch)
@@ -1865,7 +1744,12 @@ export default function CertificateGenerator() {
   if (!isEditorLaunched) {
     return (
       <>
-        <LandingPage onLaunchApp={handleLaunchEditor} />
+        <LandingPage
+          onLaunchApp={() => handleLaunchEditor(false)}
+          onLaunchWithSample={() => handleLaunchEditor(true)}
+          onOpenDocs={() => setIsDocsModalOpen(true)}
+        />
+        <DocsModal isOpen={isDocsModalOpen && !isEditorLaunched} onClose={() => setIsDocsModalOpen(false)} />
         <LoaderOverlay
           visible={isLaunchingEditor}
           title="Launching Editor"
@@ -1927,9 +1811,45 @@ export default function CertificateGenerator() {
         selectedExportIndices={selectedExportIndices}
         setSelectedExportIndices={setSelectedExportIndices}
         awardees={awardees}
-        executeBatchZipExport={executeBatchZipExport}
+        executeBatchZipExport={handleBatchZipExport}
+        exportAllToSinglePDF={handleSinglePdfExport}
+        exportPreviewPdf={exportTestPdf}
+        exportSummary={exportSummary}
+        exportEstimate={exportEstimate}
+        canvasSize={canvasSize}
         isExporting={isExporting}
       />
+      <ExportProgressOverlay
+        visible={isExporting}
+        progress={exportProgress}
+        label={exportStatusLabel}
+        onCancel={cancelExport}
+      />
+      <RestoreProjectModal
+        isOpen={showRestoreModal && !!pendingRestore}
+        savedAt={formatAutosaveTime(pendingRestore?.savedAt)}
+        projectName={pendingRestore?.projectName}
+        awardeeCount={pendingRestore?.awardees?.length || 0}
+        onRestore={handleRestoreProject}
+        onDiscard={handleDiscardRestore}
+      />
+      <CsvImportModal
+        isOpen={isCsvImportModalOpen}
+        parsedCsv={parsedCsvDraft}
+        onClose={() => { setIsCsvImportModalOpen(false); setParsedCsvDraft(null); }}
+        onConfirm={handleCsvImportConfirm}
+      />
+      <OnboardingWizard
+        isOpen={showOnboardingWizard}
+        onClose={handleCompleteOnboarding}
+        onComplete={handleCompleteOnboarding}
+        onLoadSample={handleLoadSampleProject}
+        onApplyTemplate={handleOnboardingTemplate}
+        onImportCsv={handleOnboardingCsvImport}
+        onExportTest={exportTestPdf}
+        isExporting={isExporting}
+      />
+      <DocsModal isOpen={isDocsModalOpen && isEditorLaunched} onClose={() => setIsDocsModalOpen(false)} />
 
       {/* TOP MENU BAR (Hidden in Preview Mode) */}
       {!isPreviewMode && (
@@ -1941,6 +1861,10 @@ export default function CertificateGenerator() {
           projectName={projectName}
           setProjectName={setProjectName}
           setIsKeyboardModalOpen={setIsKeyboardModalOpen}
+          autoSaveLabel={isSaving ? 'Saving…' : (lastSavedAt ? `Saved ${formatAutosaveTimeShort(lastSavedAt)}` : null)}
+          autoSaveTitle={lastSavedAt ? formatSaveTime(lastSavedAt) : null}
+          onOpenDocs={() => setIsDocsModalOpen(true)}
+          onOpenOnboarding={() => setShowOnboardingWizard(true)}
         />
       )}
 
@@ -2070,6 +1994,21 @@ export default function CertificateGenerator() {
                     </div>
                   </div>
 
+                  {/* Data validation panel */}
+                  {awardeeValidation.warnings.length > 0 && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3 space-y-2">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900">
+                        <AlertTriangle size={14} className="text-amber-600" />
+                        Data validation
+                      </div>
+                      <ul className="space-y-1">
+                        {awardeeValidation.warnings.map((warning) => (
+                          <li key={warning} className="text-[11px] text-amber-900 leading-relaxed">• {warning}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
                   {/* Awardees List with Search & Pagination */}
                   <div className="space-y-3">
                     <div className="flex justify-between items-center">
@@ -2084,10 +2023,19 @@ export default function CertificateGenerator() {
                         </button>
                       </div>
 
-                      <label className="text-xs bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 px-2.5 py-1 rounded-md cursor-pointer flex items-center gap-1 font-semibold transition shadow-sm">
-                        <Upload size={12} className="text-purple-600" /> CSV Import
-                        <input type="file" accept=".csv" onChange={handleCSVImport} className="hidden" />
-                      </label>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={exportAwardeesCsv}
+                          className="text-xs bg-white hover:bg-purple-50 text-purple-900 border border-purple-200 px-2.5 py-1 rounded-md flex items-center gap-1 font-semibold transition shadow-sm"
+                          title="Export awardee data as CSV"
+                        >
+                          <Download size={12} className="text-purple-600" /> Export CSV
+                        </button>
+                        <label className="text-xs bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 px-2.5 py-1 rounded-md cursor-pointer flex items-center gap-1 font-semibold transition shadow-sm">
+                          <Upload size={12} className="text-purple-600" /> CSV Import
+                          <input type="file" accept=".csv" onChange={handleCSVImport} className="hidden" />
+                        </label>
+                      </div>
                     </div>
 
                     {/* Sidebar Search Input */}
@@ -2096,39 +2044,112 @@ export default function CertificateGenerator() {
                       <input 
                         type="text" 
                         value={sidebarSearchQuery} 
-                        onChange={(e) => { setSidebarSearchQuery(e.target.value); setSidebarPage(0); }}
-                        placeholder="Search awardees by name or position..."
+                        onChange={(e) => {
+                          const query = e.target.value;
+                          setSidebarSearchQuery(query);
+                          if (query.trim()) {
+                            const firstMatch = awardees.findIndex(a => awardeeMatchesQuery(a, query));
+                            if (firstMatch >= 0) {
+                              setSidebarPage(Math.floor(firstMatch / itemsPerPage));
+                            }
+                          }
+                        }}
+                        placeholder="Search by name or position…"
                         className="bg-transparent text-xs text-zinc-900 focus:outline-none w-full font-medium"
                       />
                       {sidebarSearchQuery && (
-                        <button onClick={() => setSidebarSearchQuery('')} className="text-zinc-400 hover:text-zinc-600 text-xs font-bold">×</button>
+                        <button
+                          onClick={() => setSidebarSearchQuery('')}
+                          className="text-zinc-400 hover:text-zinc-600 text-xs font-bold"
+                        >
+                          ×
+                        </button>
                       )}
                     </div>
+
+                    {sidebarSearchQuery.trim() && (
+                      <div className="rounded-xl border border-purple-200 bg-purple-50/50 p-2.5 space-y-2">
+                        <p className="text-[10px] font-bold text-purple-900 uppercase tracking-wide">
+                          {sidebarSearchMatches.length} match{sidebarSearchMatches.length === 1 ? '' : 'es'} in {awardees.length} awardees
+                        </p>
+                        {sidebarSearchMatches.length === 0 ? (
+                          <p className="text-xs text-zinc-500">No awardees match your search.</p>
+                        ) : (
+                          <div className="max-h-36 overflow-y-auto space-y-1">
+                            {sidebarSearchMatches.map((item) => (
+                              <button
+                                key={item.id || item.originalIdx}
+                                onClick={() => jumpToAwardee(item.originalIdx)}
+                                className={`w-full text-left px-2.5 py-2 rounded-lg border text-xs transition ${
+                                  currentAwardeeIdx === item.originalIdx
+                                    ? 'border-purple-600 bg-purple-100 text-purple-950'
+                                    : 'border-purple-100 bg-white hover:bg-purple-50 text-zinc-700'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-bold text-purple-800 shrink-0">
+                                    #{item.originalIdx + 1} of {awardees.length}
+                                  </span>
+                                  {currentAwardeeIdx === item.originalIdx && (
+                                    <span className="text-[10px] font-bold text-purple-700 uppercase">Selected</span>
+                                  )}
+                                </div>
+                                <p className="font-semibold text-zinc-900 truncate mt-0.5">{item.name || '(Unnamed Awardee)'}</p>
+                                {item.position && (
+                                  <p className="text-[11px] text-zinc-500 truncate">{item.position}</p>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div className="space-y-2">
                       {paginatedSidebarAwardees.map((item) => {
                         const idx = item.originalIdx;
+                        const isSearchMatch = sidebarSearchQuery.trim() && awardeeMatchesQuery(item, sidebarSearchQuery);
+                        const isDimmed = sidebarSearchQuery.trim() && !isSearchMatch;
                         return (
                           <div 
                             key={item.id} 
-                            onClick={() => setCurrentAwardeeIdx(idx)}
-                            className={`p-3 rounded-xl border flex flex-col gap-2 cursor-pointer transition shadow-sm ${currentAwardeeIdx === idx ? 'border-purple-600 bg-purple-50/50' : 'border-purple-100 bg-white hover:bg-purple-50/20'}`}
+                            onClick={() => jumpToAwardee(idx)}
+                            className={`p-3 rounded-xl border flex flex-col gap-2 cursor-pointer transition shadow-sm ${
+                              currentAwardeeIdx === idx
+                                ? 'border-purple-600 bg-purple-50/50 ring-1 ring-purple-300'
+                                : isSearchMatch
+                                  ? 'border-purple-400 bg-purple-50/30'
+                                  : isDimmed
+                                    ? 'border-purple-100/60 bg-white/60 opacity-55'
+                                    : 'border-purple-100 bg-white hover:bg-purple-50/20'
+                            }`}
                           >
+                            <div className="flex justify-between items-center gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">
+                                  #{idx + 1} of {awardees.length}
+                                </span>
+                                {isSearchMatch && (
+                                  <span className="text-[10px] font-bold text-emerald-700 uppercase">Match</span>
+                                )}
+                              </div>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); if (awardees.length > 1) setAwardees(awardees.filter((_, i) => i !== idx)); }}
+                                className="text-zinc-400 hover:text-red-500 p-1 transition shrink-0"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
                             <div className="flex justify-between items-center">
                               <input 
                                 type="text" 
                                 value={item.name} 
                                 onChange={(e) => handleAwardeeChange('name', e.target.value)}
                                 onBlur={() => commitHistorySnapshot()}
+                                onClick={(e) => e.stopPropagation()}
                                 placeholder="Awardee Name"
                                 className="w-full bg-transparent font-bold text-sm text-zinc-900 focus:outline-none"
                               />
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); if (awardees.length > 1) setAwardees(awardees.filter((_, i) => i !== idx)); }}
-                                className="text-zinc-400 hover:text-red-500 p-1 transition"
-                              >
-                                <Trash2 size={14} />
-                              </button>
                             </div>
                             
                             <div>
@@ -2182,7 +2203,10 @@ export default function CertificateGenerator() {
                         >
                           Previous
                         </button>
-                        <span>Page {sidebarPage + 1} of {totalSidebarPages}</span>
+                        <span className="text-center leading-tight">
+                          <span className="block font-semibold text-purple-900">#{sidebarPageStart}–{sidebarPageEnd} of {awardees.length}</span>
+                          <span className="text-[10px] text-zinc-500">Page {sidebarPage + 1} of {totalSidebarPages}</span>
+                        </span>
                         <button 
                           onClick={() => setSidebarPage(p => Math.min(totalSidebarPages - 1, p + 1))}
                           disabled={sidebarPage >= totalSidebarPages - 1}
@@ -2589,7 +2613,7 @@ export default function CertificateGenerator() {
                       currentAwardeeIdx={currentAwardeeIdx}
                       searchQuery={awardeeSearchQuery}
                       setSearchQuery={setAwardeeSearchQuery}
-                      onSelectAwardee={(idx) => setCurrentAwardeeIdx(idx)}
+                      onSelectAwardee={jumpToAwardee}
                     />
                   </div>
 
@@ -2755,6 +2779,61 @@ export default function CertificateGenerator() {
                   </>
                 ) : null}
 
+                {selectedIds.length === 1 && primarySelectedElement && primarySelectedElement.type === 'qrcode' ? (
+                  <>
+                    <div className="flex items-center gap-1.5 border border-purple-200 rounded-xl px-2 py-1 bg-white shadow-sm shrink-0 min-w-[200px] max-w-[min(420px,70vw)]">
+                      <QrCode size={14} className="text-purple-600 shrink-0" />
+                      <input
+                        type="text"
+                        value={normalizeQrTemplate(primarySelectedElement.data || '')}
+                        onChange={(e) => updateSelectedElementLive('data', e.target.value)}
+                        onBlur={() => {
+                          const normalized = normalizeQrTemplate(primarySelectedElement.data || '');
+                          if (normalized !== (primarySelectedElement.data || '')) {
+                            updateSelectedElementLive('data', normalized);
+                          }
+                          commitHistorySnapshot();
+                        }}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        placeholder="https://verify.example.com/{{Name}}"
+                        title={`QR encodes: ${getElementText(primarySelectedElement) || 'Enter URL or text with {{ColumnName}} tags'}`}
+                        className="min-w-0 flex-1 bg-transparent text-xs text-zinc-900 font-medium focus:outline-none placeholder:text-zinc-400"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1 border border-purple-200 rounded-xl px-2 py-1 bg-white shadow-sm shrink-0">
+                      <span className="text-[10px] text-zinc-500 font-semibold uppercase">Size</span>
+                      <input
+                        type="number"
+                        value={primarySelectedElement.size || 90}
+                        min={50}
+                        max={300}
+                        onChange={(e) => updateSelectedElement('size', Number(e.target.value))}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        className="w-12 bg-transparent text-xs text-zinc-900 font-semibold focus:outline-none"
+                        title="QR code size in pixels"
+                      />
+                      <span className="text-xs text-zinc-500">px</span>
+                    </div>
+                  </>
+                ) : null}
+
+                <button
+                  onClick={duplicateSelectedElements}
+                  className="p-2 text-zinc-700 hover:text-purple-800 hover:bg-purple-50 rounded-full transition shrink-0"
+                  title="Duplicate selected (Ctrl+D)"
+                >
+                  <Copy size={16} />
+                </button>
+                <button
+                  onClick={toggleLockSelected}
+                  className="p-2 text-zinc-700 hover:text-purple-800 hover:bg-purple-50 rounded-full transition shrink-0"
+                  title={primarySelectedElement?.locked ? 'Unlock selected' : 'Lock position'}
+                >
+                  {primarySelectedElement?.locked ? <Unlock size={16} /> : <Lock size={16} />}
+                </button>
+
                 <button onClick={deleteSelectedElements} className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-full transition shrink-0" title="Delete selected"><Trash2 size={16} /></button>
               </div>
             </div>
@@ -2868,7 +2947,7 @@ export default function CertificateGenerator() {
                     <div
                       key={el.id}
                       onPointerDown={(e) => { if (!isPreviewMode) handleElementPointerDown(e, el.id); }}
-                      className={`absolute ${!isPreviewMode ? 'cursor-move' : ''} ${isSelected ? 'ring-2 ring-purple-600 bg-purple-600/5' : (!isPreviewMode ? 'hover:ring-1 hover:ring-purple-400/50' : '')}`}
+                      className={`absolute ${!isPreviewMode ? (el.locked ? 'cursor-not-allowed' : 'cursor-move') : ''} ${isSelected ? 'ring-2 ring-purple-600 bg-purple-600/5' : (!isPreviewMode ? 'hover:ring-1 hover:ring-purple-400/50' : '')} ${el.locked ? 'opacity-95' : ''}`}
                       style={{
                         left: `${el.x}%`,
                         top: `${el.y}%`,
@@ -2877,6 +2956,11 @@ export default function CertificateGenerator() {
                         zIndex: isSelected ? 30 : 10
                       }}
                     >
+                      {el.locked && !isPreviewMode && (
+                        <div className="absolute -top-2 -right-2 z-40 bg-amber-100 border border-amber-300 text-amber-800 rounded-full p-0.5 shadow-sm pointer-events-none">
+                          <Lock size={10} />
+                        </div>
+                      )}
                       {el.type === 'text' ? (
                           isEditing ? (
                           <div
@@ -2932,23 +3016,10 @@ export default function CertificateGenerator() {
                           className="w-full h-auto object-contain pointer-events-none select-none"
                         />
                       ) : el.type === 'qrcode' ? (
-                        (() => {
-                          const qrText = getElementText(el) || el.data || 'https://batchcert.verify';
-                          const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrText)}`;
-                          return (
-                            <div 
-                              className="bg-white p-1.5 rounded shadow-md flex items-center justify-center border border-purple-100"
-                              style={{ width: `${el.size || 90}px`, height: `${el.size || 90}px` }}
-                            >
-                              <img 
-                                src={qrApiUrl} 
-                                alt="QR Code" 
-                                crossOrigin="anonymous"
-                                className="w-full h-full object-contain pointer-events-none select-none"
-                              />
-                            </div>
-                          );
-                        })()
+                        <QRCodeElement
+                          text={getElementText(el) || el.data || 'https://batchcert.verify'}
+                          size={el.size || 90}
+                        />
                       ) : null}
 
                       {isSelected && !isPreviewMode && selectedIds.length === 1 && (

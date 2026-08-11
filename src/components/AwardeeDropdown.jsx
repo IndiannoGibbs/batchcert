@@ -9,9 +9,10 @@ export default function AwardeeDropdown({
   currentAwardeeIdx,
   searchQuery,
   setSearchQuery,
-  onSelectAwardee
+  onSelectAwardee,
 }) {
   const dropdownRef = useRef(null);
+  const query = searchQuery.trim().toLowerCase();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -33,13 +34,21 @@ export default function AwardeeDropdown({
 
   if (!isOpen) return null;
 
+  const matches = awardees
+    .map((a, idx) => ({ ...a, originalIdx: idx }))
+    .filter(a =>
+      !query
+      || (a.name || '').toLowerCase().includes(query)
+      || (a.position || '').toLowerCase().includes(query)
+    );
+
   return createPortal(
-    <div ref={dropdownRef} className="fixed top-14 left-4 z-[9999] w-72 bg-white/95 backdrop-blur-md border border-purple-200 rounded-2xl shadow-2xl p-2 space-y-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div ref={dropdownRef} className="fixed top-14 left-4 z-[9999] w-80 bg-white/95 backdrop-blur-md border border-purple-200 rounded-2xl shadow-2xl p-2 space-y-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <div className="flex items-center gap-1 bg-purple-50 px-2 py-1.5 rounded-lg border border-purple-200">
         <Search size={13} className="text-purple-600" />
-        <input 
+        <input
           type="text"
-          placeholder="Search awardee..."
+          placeholder="Search by name or position…"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="bg-transparent text-xs text-zinc-900 focus:outline-none w-full font-medium"
@@ -47,24 +56,43 @@ export default function AwardeeDropdown({
         />
       </div>
 
-      <div className="max-h-48 overflow-y-auto space-y-1">
-        {awardees
-          .map((a, idx) => ({ ...a, originalIdx: idx }))
-          .filter(a => (a.name || '').toLowerCase().includes(searchQuery.toLowerCase()))
-          .map((a) => (
-            <button
-              key={a.id || a.originalIdx}
-              onClick={() => {
-                onSelectAwardee(a.originalIdx);
-                setSearchQuery('');
-                onClose();
-              }}
-              className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between transition ${currentAwardeeIdx === a.originalIdx ? 'bg-purple-100 text-purple-950 font-bold' : 'hover:bg-purple-50 text-zinc-700'}`}
-            >
-              <span className="truncate">{a.originalIdx + 1}. {a.name || '(Unnamed)'}</span>
-              {currentAwardeeIdx === a.originalIdx && <Check size={12} className="text-purple-700" />}
-            </button>
-          ))}
+      {query && (
+        <p className="text-[10px] font-bold text-purple-900 uppercase px-1">
+          {matches.length} match{matches.length === 1 ? '' : 'es'} in {awardees.length} awardees
+        </p>
+      )}
+
+      <div className="max-h-56 overflow-y-auto space-y-1">
+        {matches.length === 0 ? (
+          <p className="text-xs text-zinc-500 px-2 py-3">No awardees match your search.</p>
+        ) : matches.map((a) => (
+          <button
+            key={a.id || a.originalIdx}
+            onClick={() => {
+              onSelectAwardee(a.originalIdx);
+              setSearchQuery('');
+              onClose();
+            }}
+            className={`w-full text-left px-2.5 py-2 rounded-lg text-xs transition border ${
+              currentAwardeeIdx === a.originalIdx
+                ? 'border-purple-600 bg-purple-100 text-purple-950'
+                : 'border-transparent hover:bg-purple-50 text-zinc-700'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-bold text-purple-800 shrink-0">
+                #{a.originalIdx + 1} of {awardees.length}
+              </span>
+              {currentAwardeeIdx === a.originalIdx && (
+                <Check size={12} className="text-purple-700 shrink-0" />
+              )}
+            </div>
+            <p className="font-semibold text-zinc-900 truncate mt-0.5">{a.name || '(Unnamed)'}</p>
+            {a.position && (
+              <p className="text-[11px] text-zinc-500 truncate">{a.position}</p>
+            )}
+          </button>
+        ))}
       </div>
     </div>,
     document.body
