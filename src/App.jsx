@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   Upload, Download, Plus, Trash2, ChevronLeft, ChevronRight, 
   Move, Type, Image as ImageIcon, Layout, Users, FileText, 
-  AlignLeft, AlignCenter, AlignRight, Palette, Scaling, Sliders, Minus, Save, FolderOpen,
+  AlignLeft, AlignCenter, AlignRight, AlignJustify, Palette, Scaling, Sliders, Minus, Save, FolderOpen,
   ZoomIn, ZoomOut, RotateCcw, CheckSquare, Undo2, SlidersHorizontal,
   Bold, Italic, Underline, FilePlus, FileCode, Award, PenTool,
   Layers, Eye, EyeOff, ArrowUp, ArrowDown, Check, X, Search, Maximize2, Minimize2, Grid,
@@ -563,19 +563,25 @@ export default function CertificateGenerator() {
       widthPct = ((el.size || 100) / canvasSize.width) * 100;
     }
 
-    const isCentered = el.align === 'center' || el.type === 'logo';
+    const anchor = el.type === 'logo' || el.align === 'center'
+      ? 'center'
+      : (el.type === 'text' && el.align === 'right' ? 'right' : 'left');
     let left, center, right;
 
-    if (isCentered) {
+    if (anchor === 'center') {
       center = el.x;
       left = el.x - widthPct / 2;
       right = el.x + widthPct / 2;
+    } else if (anchor === 'right') {
+      right = el.x;
+      left = el.x - widthPct;
+      center = el.x - widthPct / 2;
     } else {
       left = el.x;
       center = el.x + widthPct / 2;
       right = el.x + widthPct;
     }
-    return { widthPct, isCentered, left, center, right, y: el.y };
+    return { widthPct, anchor, isCentered: anchor === 'center', left, center, right, y: el.y };
   };
 
   const handleAlign = (type) => {
@@ -607,11 +613,17 @@ export default function CertificateGenerator() {
 
       let newX = item.x;
       if (type === 'left') {
-        newX = match.isCentered ? targetVal + match.widthPct / 2 : targetVal;
+        if (match.anchor === 'center') newX = targetVal + match.widthPct / 2;
+        else if (match.anchor === 'right') newX = targetVal;
+        else newX = targetVal;
       } else if (type === 'center') {
-        newX = match.isCentered ? targetVal : targetVal - match.widthPct / 2;
+        if (match.anchor === 'center') newX = targetVal;
+        else if (match.anchor === 'right') newX = targetVal + match.widthPct / 2;
+        else newX = targetVal - match.widthPct / 2;
       } else if (type === 'right') {
-        newX = match.isCentered ? targetVal - match.widthPct / 2 : targetVal - match.widthPct;
+        if (match.anchor === 'center') newX = targetVal - match.widthPct / 2;
+        else if (match.anchor === 'right') newX = targetVal;
+        else newX = targetVal - match.widthPct;
       }
 
       newX = Math.max(2, Math.min(98, newX));
@@ -640,7 +652,10 @@ export default function CertificateGenerator() {
 
         const targetCenter = minC + matchIdx * step;
         const b = boundsList[matchIdx];
-        let newX = b.isCentered ? targetCenter : targetCenter - b.widthPct / 2;
+        let newX;
+        if (b.anchor === 'center') newX = targetCenter;
+        else if (b.anchor === 'right') newX = targetCenter + b.widthPct / 2;
+        else newX = targetCenter - b.widthPct / 2;
         newX = Math.max(2, Math.min(98, newX));
         return { ...item, x: newX };
       });
@@ -817,6 +832,19 @@ export default function CertificateGenerator() {
     if (!activeId) return;
     const updated = activeElements.map(el => el.id === activeId ? { ...el, [key]: value } : el);
     pushHistory(updated);
+  };
+
+  const handleTextAlign = (alignValue) => {
+    if (selectedIds.length !== 1) return;
+    const el = activeElements.find(e => e.id === selectedIds[selectedIds.length - 1]);
+    if (!el || el.type !== 'text') return;
+    updateSelectedElement('align', alignValue);
+  };
+
+  const getTextElementTransform = (el) => {
+    if (el.type === 'logo' || el.align === 'center') return 'translateX(-50%)';
+    if (el.type === 'text' && el.align === 'right') return 'translateX(-100%)';
+    return 'none';
   };
 
   // Group Deletion / Single Deletion support
@@ -1639,6 +1667,86 @@ export default function CertificateGenerator() {
     setIsExportModalOpen(true);
   };
 
+  const waitForCanvasRender = () =>
+    new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 80))));
+
+  const getPdfOrientation = (pageWidth, pageHeight) =>
+    pageWidth >= pageHeight ? 'landscape' : 'portrait';
+
+  const createCertificatePdf = (pageWidth, pageHeight) =>
+    new jsPDF({
+      orientation: getPdfOrientation(pageWidth, pageHeight),
+      unit: 'px',
+      format: [pageWidth, pageHeight],
+    });
+
+  const addCertificatePdfPage = (pdf, pageWidth, pageHeight) => {
+    pdf.addPage([pageWidth, pageHeight], getPdfOrientation(pageWidth, pageHeight));
+  };
+
+  const addCertificatePdfImage = (pdf, imgData) => {
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = pdf.internal.pageSize.getHeight();
+    pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+  };
+
+  const captureCanvasForExport = async () => {
+    const canvasElement = canvasRef.current;
+    if (!canvasElement) return null;
+
+    const renderScale = Number(exportScale);
+    const pageWidth = canvasSize.width;
+    const pageHeight = canvasSize.height;
+
+    const sandbox = document.createElement('div');
+    sandbox.setAttribute('aria-hidden', 'true');
+    sandbox.style.cssText = [
+      'position: fixed',
+      'left: -99999px',
+      'top: 0',
+      `width: ${pageWidth}px`,
+      `height: ${pageHeight}px`,
+      'overflow: visible',
+      'pointer-events: none',
+      'opacity: 0',
+      'z-index: -1',
+    ].join(';');
+
+    const clone = canvasElement.cloneNode(true);
+    clone.style.transform = 'none';
+    clone.style.transformOrigin = 'top left';
+    clone.style.width = `${pageWidth}px`;
+    clone.style.height = `${pageHeight}px`;
+    clone.style.position = 'relative';
+    clone.style.left = '0';
+    clone.style.top = '0';
+    clone.style.margin = '0';
+    clone.style.boxShadow = 'none';
+
+    sandbox.appendChild(clone);
+    document.body.appendChild(sandbox);
+
+    try {
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+      const renderedCanvas = await html2canvas(clone, {
+        scale: renderScale,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+      });
+
+      return {
+        renderedCanvas,
+        imgData: renderedCanvas.toDataURL('image/jpeg', 0.92),
+        pageWidth,
+        pageHeight,
+      };
+    } finally {
+      sandbox.remove();
+    }
+  };
+
   const executeBatchZipExport = async () => {
     if (!canvasRef.current) return;
     setIsExportModalOpen(false);
@@ -1648,6 +1756,7 @@ export default function CertificateGenerator() {
     if (document.fonts && document.fonts.ready) {
       await document.fonts.ready;
     }
+    await waitForCanvasRender();
 
     const zip = new JSZip();
     const indicesToExport = exportMode === 'all' 
@@ -1662,36 +1771,26 @@ export default function CertificateGenerator() {
       setCurrentAwardeeIdx(awardeeIdx);
       setExportProgress(Math.round(((i + 1) / total) * 100));
 
-      await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 80)));
+      await waitForCanvasRender();
 
-      const canvasElement = canvasRef.current;
-      const renderedCanvas = await html2canvas(canvasElement, {
-        scale: Number(exportScale),
-        useCORS: true,
-        logging: false
-      });
+      const capture = await captureCanvasForExport();
+      if (!capture) continue;
 
       const awardeeObj = awardees[awardeeIdx];
       const safeName = (awardeeObj.name || `Awardee_${awardeeIdx + 1}`).replace(/[^a-zA-Z0-9]/g, '_');
 
       if (exportFormat === 'pdf') {
-        const imgData = renderedCanvas.toDataURL('image/jpeg', 0.85);
-        const orientation = canvasSize.width > canvasSize.height ? 'landscape' : 'portrait';
-        const pdf = new jsPDF({
-          orientation,
-          unit: 'px',
-          format: [canvasSize.width, canvasSize.height]
-        });
-        pdf.addImage(imgData, 'JPEG', 0, 0, canvasSize.width, canvasSize.height);
+        const pdf = createCertificatePdf(capture.pageWidth, capture.pageHeight);
+        addCertificatePdfImage(pdf, capture.imgData);
         const pdfBlob = pdf.output('blob');
         zip.file(`BatchCert_${awardeeIdx + 1}_${safeName}.pdf`, pdfBlob);
       } else {
-        const pngBlob = await new Promise((resolve) => renderedCanvas.toBlob(resolve, 'image/png'));
+        const pngBlob = await new Promise((resolve) => capture.renderedCanvas.toBlob(resolve, 'image/png'));
         zip.file(`BatchCert_${awardeeIdx + 1}_${safeName}.png`, pngBlob);
       }
 
-      renderedCanvas.width = 0;
-      renderedCanvas.height = 0;
+      capture.renderedCanvas.width = 0;
+      capture.renderedCanvas.height = 0;
 
       if ((i + 1) % chunkSize === 0) {
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -1706,6 +1805,48 @@ export default function CertificateGenerator() {
     link.click();
     URL.revokeObjectURL(url);
 
+    setIsExporting(false);
+    setExportProgress(0);
+  };
+
+  const exportAllToSinglePDF = async () => {
+    if (!canvasRef.current || awardees.length === 0) return;
+
+    const initialIdx = currentAwardeeIdx;
+    setIsExporting(true);
+    setSelectedIds([]);
+
+    if (document.fonts && document.fonts.ready) {
+      await document.fonts.ready;
+    }
+    await waitForCanvasRender();
+
+    let pdf = null;
+
+    for (let i = 0; i < awardees.length; i++) {
+      setCurrentAwardeeIdx(i);
+      setExportProgress(Math.round(((i + 1) / awardees.length) * 100));
+
+      await waitForCanvasRender();
+
+      const capture = await captureCanvasForExport();
+      if (!capture) continue;
+
+      if (i === 0) {
+        pdf = createCertificatePdf(capture.pageWidth, capture.pageHeight);
+      } else {
+        addCertificatePdfPage(pdf, capture.pageWidth, capture.pageHeight);
+      }
+      addCertificatePdfImage(pdf, capture.imgData);
+
+      capture.renderedCanvas.width = 0;
+      capture.renderedCanvas.height = 0;
+    }
+
+    if (pdf) {
+      pdf.save('batch_certificates_all.pdf');
+    }
+    setCurrentAwardeeIdx(initialIdx);
     setIsExporting(false);
     setExportProgress(0);
   };
@@ -2370,14 +2511,22 @@ export default function CertificateGenerator() {
 
             </div>
 
-            <div className="p-4 border-t border-purple-100 bg-purple-50/40">
+            <div className="p-4 border-t border-purple-100 bg-purple-50/40 space-y-2">
               <button 
                 onClick={openExportModal}
                 disabled={isExporting}
                 className="w-full py-3 bg-gradient-to-r from-purple-600 to-purple-800 hover:from-purple-700 hover:to-purple-900 font-bold text-white rounded-xl shadow-md flex items-center justify-center gap-2 transition disabled:opacity-50"
               >
                 <Download size={18} />
-                {isExporting ? `Exporting ZIP (${exportProgress}%)...` : `Export Certificates (ZIP)`}
+                {isExporting ? `Exporting (${exportProgress}%)...` : `Export Certificates (ZIP)`}
+              </button>
+              <button 
+                onClick={exportAllToSinglePDF}
+                disabled={isExporting || awardees.length === 0}
+                className="w-full py-2.5 bg-white border border-purple-300 hover:bg-purple-50 font-bold text-purple-900 rounded-xl shadow-sm flex items-center justify-center gap-2 transition disabled:opacity-50 text-sm"
+              >
+                <FileText size={16} />
+                Export All as Single PDF
               </button>
             </div>
             <div className="p-4 border-t border-gray-200 bg-gray-50">
@@ -2503,18 +2652,13 @@ export default function CertificateGenerator() {
             </div>
           )}
 
-          <div 
-            ref={containerRef}
-            className={`flex-1 flex items-center justify-center p-12 overflow-auto relative select-none ${isPreviewMode ? 'bg-zinc-950' : 'bg-purple-50/20'}`}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-          >
-            {selectedIds.length > 0 && !isPreviewMode && (
-              <div className="absolute top-4 left-1/2 z-50 -translate-x-1/2 bg-white/95 backdrop-blur-md border border-purple-200 rounded-2xl shadow-2xl px-3 py-1.5 flex items-center gap-2">
-                <div className="flex items-center gap-1 border border-transparent rounded-full bg-purple-50/80 px-1 py-1">
-                  <button onClick={() => handleAlign('left')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-100 rounded-full transition" title="Align Left"><AlignLeft size={14} /></button>
-                  <button onClick={() => handleAlign('center')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-100 rounded-full transition" title="Align Center"><AlignCenter size={14} /></button>
-                  <button onClick={() => handleAlign('right')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-100 rounded-full transition" title="Align Right"><AlignRight size={14} /></button>
+          {selectedIds.length > 0 && !isPreviewMode && (
+            <div className="absolute top-14 inset-x-0 z-50 flex justify-center px-4 pt-3 pointer-events-none">
+              <div className="pointer-events-auto max-w-full overflow-x-auto bg-white/95 backdrop-blur-md border border-purple-200 rounded-2xl shadow-2xl px-3 py-1.5 flex items-center gap-2 flex-wrap justify-center [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div className="flex items-center gap-1 border border-transparent rounded-full bg-purple-50/80 px-1 py-1 shrink-0">
+                  <button onClick={() => handleAlign('left')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-100 rounded-full transition" title="Align element left"><AlignLeft size={14} /></button>
+                  <button onClick={() => handleAlign('center')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-100 rounded-full transition" title="Align element center"><AlignCenter size={14} /></button>
+                  <button onClick={() => handleAlign('right')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-100 rounded-full transition" title="Align element right"><AlignRight size={14} /></button>
                 </div>
 
                 {selectedIds.length === 1 && primarySelectedElement && primarySelectedElement.type === 'text' ? (
@@ -2522,7 +2666,7 @@ export default function CertificateGenerator() {
                     <select 
                       value={primarySelectedElement.font} 
                       onChange={e => updateSelectedElement('font', e.target.value)}
-                      className="bg-white text-xs border border-purple-200 rounded-xl px-2 py-1 text-zinc-800 font-medium shadow-sm focus:outline-none focus:border-purple-600"
+                      className="bg-white text-xs border border-purple-200 rounded-xl px-2 py-1 text-zinc-800 font-medium shadow-sm focus:outline-none focus:border-purple-600 shrink-0 max-w-[140px]"
                     >
                       <optgroup label="Serif / Academic">
                         <option value="Cinzel">Cinzel</option>
@@ -2553,7 +2697,7 @@ export default function CertificateGenerator() {
                       </optgroup>
                     </select>
 
-                    <div className="flex items-center gap-1 border border-purple-200 rounded-xl px-2 py-1 bg-white shadow-sm">
+                    <div className="flex items-center gap-1 border border-purple-200 rounded-xl px-2 py-1 bg-white shadow-sm shrink-0">
                       <input 
                         type="number" 
                         value={primarySelectedElement.fontSize} 
@@ -2568,22 +2712,60 @@ export default function CertificateGenerator() {
                       type="color" 
                       value={primarySelectedElement.color || '#1f2937'} 
                       onChange={e => updateSelectedElement('color', e.target.value)}
-                      className="w-8 h-8 rounded-full border border-purple-200 p-0 cursor-pointer"
+                      className="w-8 h-8 rounded-full border border-purple-200 p-0 cursor-pointer shrink-0"
                       title="Text color"
                     />
 
-                    <div className="flex items-center gap-1 border border-purple-200 rounded-xl overflow-hidden bg-white shadow-sm">
-                      <button onClick={() => applyTextFormat('bold')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 transition" title="Bold"><Bold size={14} /></button>
+                    <div className="flex items-center gap-1 border border-purple-200 rounded-xl bg-white shadow-sm shrink-0">
+                      <button onClick={() => applyTextFormat('bold')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 transition rounded-l-xl" title="Bold"><Bold size={14} /></button>
                       <button onClick={() => applyTextFormat('italic')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 transition" title="Italic"><Italic size={14} /></button>
-                      <button onClick={() => applyTextFormat('underline')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 transition" title="Underline"><Underline size={14} /></button>
+                      <button onClick={() => applyTextFormat('underline')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 transition rounded-r-xl" title="Underline"><Underline size={14} /></button>
+                    </div>
+
+                    <div className="flex items-center shrink-0 border border-purple-200 rounded-xl bg-white shadow-sm">
+                      <button
+                        onClick={() => handleTextAlign('left')}
+                        className={`p-1.5 transition rounded-l-xl ${(primarySelectedElement.align || 'left') === 'left' ? 'bg-purple-100 text-purple-800' : 'text-zinc-700 hover:text-purple-700 hover:bg-purple-50'}`}
+                        title="Align text left"
+                      >
+                        <AlignLeft size={14} />
+                      </button>
+                      <button
+                        onClick={() => handleTextAlign('center')}
+                        className={`p-1.5 transition ${primarySelectedElement.align === 'center' ? 'bg-purple-100 text-purple-800' : 'text-zinc-700 hover:text-purple-700 hover:bg-purple-50'}`}
+                        title="Align text center"
+                      >
+                        <AlignCenter size={14} />
+                      </button>
+                      <button
+                        onClick={() => handleTextAlign('right')}
+                        className={`p-1.5 transition ${primarySelectedElement.align === 'right' ? 'bg-purple-100 text-purple-800' : 'text-zinc-700 hover:text-purple-700 hover:bg-purple-50'}`}
+                        title="Align text right"
+                      >
+                        <AlignRight size={14} />
+                      </button>
+                      <button
+                        onClick={() => handleTextAlign('justify')}
+                        className={`p-1.5 transition rounded-r-xl ${primarySelectedElement.align === 'justify' ? 'bg-purple-100 text-purple-800' : 'text-zinc-700 hover:text-purple-700 hover:bg-purple-50'}`}
+                        title="Justify text"
+                      >
+                        <AlignJustify size={14} />
+                      </button>
                     </div>
                   </>
                 ) : null}
 
-                <button onClick={deleteSelectedElements} className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-full transition" title="Delete selected"><Trash2 size={16} /></button>
+                <button onClick={deleteSelectedElements} className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-full transition shrink-0" title="Delete selected"><Trash2 size={16} /></button>
               </div>
-            )}
+            </div>
+          )}
 
+          <div 
+            ref={containerRef}
+            className={`flex-1 flex items-center justify-center p-12 overflow-auto relative select-none ${isPreviewMode ? 'bg-zinc-950' : 'bg-purple-50/20'}`}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+          >
             <div 
               className="relative flex-shrink-0"
               style={{
@@ -2690,8 +2872,8 @@ export default function CertificateGenerator() {
                       style={{
                         left: `${el.x}%`,
                         top: `${el.y}%`,
-                        transform: el.type === 'logo' || el.align === 'center' ? 'translateX(-50%)' : 'none',
-                        width: el.type === 'text' && el.maxWidth ? `${el.maxWidth}%` : (el.type === 'line' || el.type === 'logo') ? `${el.width || 100}px` : el.type === 'qrcode' ? `${el.size || 90}px` : 'auto',
+                        transform: getTextElementTransform(el),
+                        width: el.type === 'text' ? `${el.maxWidth || 80}%` : (el.type === 'line' || el.type === 'logo') ? `${el.width || 100}px` : el.type === 'qrcode' ? `${el.size || 90}px` : 'auto',
                         zIndex: isSelected ? 30 : 10
                       }}
                     >
@@ -2709,9 +2891,11 @@ export default function CertificateGenerator() {
                               fontFamily: getFontFamily(el.font),
                               fontSize: `${el.fontSize}px`,
                               color: el.color,
-                              textAlign: el.align,
+                              textAlign: el.align || 'left',
                               fontWeight: el.bold ? 'bold' : 'normal',
-                              lineHeight: 1.3
+                              lineHeight: 1.3,
+                              display: 'block',
+                              width: '100%'
                             }}
                           />
                         ) : (
@@ -2721,10 +2905,12 @@ export default function CertificateGenerator() {
                               fontFamily: getFontFamily(el.font),
                               fontSize: `${el.fontSize}px`,
                               color: el.color,
-                              textAlign: el.align,
+                              textAlign: el.align || 'left',
                               fontWeight: el.bold ? 'bold' : 'normal',
                               whiteSpace: 'pre-wrap',
                               lineHeight: 1.3,
+                              display: 'block',
+                              width: '100%',
                               cursor: isPreviewMode ? 'default' : 'text'
                             }}
                             title={isPreviewMode ? '' : "Double-click to edit text & highlight specific letters/words"}

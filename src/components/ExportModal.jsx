@@ -85,12 +85,21 @@ export default function ExportModal({
             <div className="space-y-2">
               <div className="flex justify-between items-center text-[11px] text-zinc-500">
                 <span>Check awardees to include in ZIP:</span>
-                <button 
-                  onClick={() => setSelectedExportIndices(awardees.map((_, i) => i))}
-                  className="text-purple-700 hover:underline font-medium"
-                >
-                  Select All
-                </button>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => setSelectedExportIndices(awardees.map((_, i) => i))}
+                    className="text-purple-700 hover:underline font-medium"
+                  >
+                    Select All
+                  </button>
+                  <span className="text-zinc-300">|</span>
+                  <button 
+                    onClick={() => setSelectedExportIndices([])}
+                    className="text-purple-700 hover:underline font-medium"
+                  >
+                    Unselect All
+                  </button>
+                </div>
               </div>
               <div className="max-h-52 overflow-y-auto space-y-1.5 border border-purple-100 bg-purple-50/20 p-2 rounded-lg">
                 {awardees.map((awardee, idx) => {
