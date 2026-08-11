@@ -80,3 +80,107 @@ export const extractDynamicHeadersFromElements = (elements) => {
   });
   return existingDynamicHeaders;
 };
+
+const isNameHeader = (header) => normalizeHeader(header) === 'name';
+const isPositionHeader = (header) =>
+  POSITION_COLUMN_VARIANTS.some(variant => normalizeHeader(header) === normalizeHeader(variant));
+
+export const findNameHeader = (headers = []) => headers.find(isNameHeader);
+export const findPositionHeader = (headers = []) => headers.find(isPositionHeader);
+
+export const getBulkEditHeaders = (csvHeaders = [], awardees = []) => {
+  const headers = [...csvHeaders];
+  const seen = new Set(headers.map(normalizeHeader));
+
+  if (!headers.some(isNameHeader)) {
+    headers.unshift('Name');
+    seen.add('name');
+  }
+
+  if (!headers.some(isPositionHeader)) {
+    const nameIdx = headers.findIndex(isNameHeader);
+    headers.splice(nameIdx >= 0 ? nameIdx + 1 : 0, 0, 'Position');
+    seen.add('position');
+  }
+
+  awardees.forEach((awardee) => {
+    Object.keys(awardee.csvData || {}).forEach((key) => {
+      const normalized = normalizeHeader(key);
+      if (!key || seen.has(normalized)) return;
+      seen.add(normalized);
+      headers.push(key);
+    });
+  });
+
+  return headers;
+};
+
+export const getAwardeeFieldValue = (awardee, header) => {
+  if (isNameHeader(header)) {
+    return awardee.name || awardee.csvData?.[header] || awardee.csvData?.Name || '';
+  }
+  if (isPositionHeader(header)) {
+    return awardee.position || awardee.csvData?.[header] || awardee.csvData?.Position || '';
+  }
+  return awardee.csvData?.[header] ?? '';
+};
+
+export const applyBulkEditRow = (awardee, row, editHeaders) => {
+  const csvData = { ...(awardee.csvData || {}) };
+  editHeaders.forEach((header) => {
+    csvData[header] = row[header] ?? '';
+  });
+
+  const nameHeader = findNameHeader(editHeaders) || 'Name';
+  const positionHeader = findPositionHeader(editHeaders) || 'Position';
+
+  return {
+    ...awardee,
+    name: row[nameHeader] ?? csvData[nameHeader] ?? awardee.name,
+    position: row[positionHeader] ?? csvData[positionHeader] ?? awardee.position,
+    csvData,
+  };
+};
+
+export const isBulkEditRowEmpty = (row, editHeaders) =>
+  editHeaders.every(header => String(row[header] ?? '').trim() === '');
+
+export const createEmptyBulkEditRow = (editHeaders, id = `new_${Date.now()}`) => {
+  const row = { _id: id };
+  editHeaders.forEach((header) => {
+    row[header] = '';
+  });
+  return row;
+};
+
+export const createAwardeeFromRow = (row, editHeaders) => {
+  const csvData = {};
+  editHeaders.forEach((header) => {
+    csvData[header] = row[header] ?? '';
+  });
+
+  const nameHeader = findNameHeader(editHeaders) || 'Name';
+  const positionHeader = findPositionHeader(editHeaders) || 'Position';
+
+  return {
+    id: row._id && !String(row._id).startsWith('new_') ? row._id : String(Date.now() + Math.random()),
+    name: String(row[nameHeader] ?? '').trim(),
+    position: String(row[positionHeader] ?? '').trim(),
+    csvData,
+    hasCustomLayout: false,
+    customElements: null,
+    customSignatories: null,
+  };
+};
+
+export const bulkEditRowsToAwardees = (rows, editHeaders, existingAwardees = []) => {
+  const existingById = new Map(existingAwardees.map(awardee => [awardee.id, awardee]));
+
+  return rows
+    .filter(row => !isBulkEditRowEmpty(row, editHeaders))
+    .map((row) => {
+      const existing = row._id ? existingById.get(row._id) : null;
+      if (existing) return applyBulkEditRow(existing, row, editHeaders);
+      return createAwardeeFromRow(row, editHeaders);
+    });
+};

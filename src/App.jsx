@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
-  Upload, Download, Plus, Trash2, ChevronLeft, ChevronRight, 
+  Upload, Download, Plus, Trash2, ChevronLeft, ChevronRight, ChevronDown,
   Move, Type, Image as ImageIcon, Layout, Users, FileText, 
   AlignLeft, AlignCenter, AlignRight, AlignJustify, Palette, Scaling, Sliders, Minus, Save, FolderOpen,
   ZoomIn, ZoomOut, RotateCcw, CheckSquare, Undo2, SlidersHorizontal,
   Bold, Italic, Underline, FilePlus, FileCode, Award, PenTool,
   Layers, Eye, EyeOff, ArrowUp, ArrowDown, Check, X, Search, Maximize2, Minimize2, Grid,
-  Maximize, Info, Tag, FileType, QrCode, HelpCircle, Sparkles, ArrowRight, Coffee, Copy, Lock, Unlock, AlertTriangle
+  Maximize, Info, Tag, FileType, QrCode, HelpCircle, Sparkles, ArrowRight, Coffee, Copy, Lock, Unlock, AlertTriangle,
+  AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, Paintbrush, ClipboardPaste, Table2, Stamp,
 } from 'lucide-react';
 import LandingPage from './components/LandingPage';
 import LoaderOverlay from './components/LoaderOverlay';
@@ -22,6 +23,7 @@ import CsvImportModal from './components/CsvImportModal';
 import QRCodeElement from './components/QRCodeElement';
 import OnboardingWizard from './components/OnboardingWizard';
 import DocsModal from './components/DocsModal';
+import AwardeeBulkEditModal from './components/AwardeeBulkEditModal';
 import { GOOGLE_FONTS, CANVAS_PRESETS, PRESET_BACKGROUNDS } from './constants/index.js';
 import { SAMPLE_PROJECT } from './constants/sampleProject.js';
 import { deduplicateElements, getTextElementTransform } from './lib/elements.js';
@@ -32,7 +34,10 @@ import {
   buildAwardeesFromCsv,
   getCustomCsvHeaders,
   extractDynamicHeadersFromElements,
+  getBulkEditHeaders,
+  bulkEditRowsToAwardees,
 } from './lib/csv/parseCsv.js';
+import { ensureAwardeeFieldElements } from './lib/awardeeCanvasElements.js';
 import { getExportSummary } from './lib/export/pdfHelpers.js';
 import { estimateExport } from './lib/export/estimateExport.js';
 import { validateAwardees } from './lib/awardeeValidation.js';
@@ -166,6 +171,8 @@ export default function CertificateGenerator() {
   const [showRestoreModal, setShowRestoreModal] = useState(false);
   const [showOnboardingWizard, setShowOnboardingWizard] = useState(false);
   const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
+  const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
+  const [copiedTextStyle, setCopiedTextStyle] = useState(null);
   const [launchWithSample, setLaunchWithSample] = useState(false);
   const [postLaunchAction, setPostLaunchAction] = useState(null);
 
@@ -197,6 +204,9 @@ export default function CertificateGenerator() {
   const currentAwardee = awardees[currentAwardeeIdx] || {};
   const activeElements = deduplicateElements((currentAwardee.hasCustomLayout && currentAwardee.customElements) ? currentAwardee.customElements : elements);
   const activeSignatories = (currentAwardee.hasCustomLayout && currentAwardee.customSignatories) ? currentAwardee.customSignatories : signatories;
+  const activeElementsRef = useRef(activeElements);
+  activeElementsRef.current = activeElements;
+  const arrowNudgeActiveRef = useRef(false);
 
 
   // Load Google Fonts into document head dynamically on mount
@@ -378,6 +388,13 @@ export default function CertificateGenerator() {
     };
   };
 
+  const applySnapshotToState = (snapshot) => {
+    setElements(JSON.parse(JSON.stringify(snapshot.elements)));
+    setGlobalData(JSON.parse(JSON.stringify(snapshot.globalData)));
+    setAwardees(JSON.parse(JSON.stringify(snapshot.awardees)));
+    setSignatories(JSON.parse(JSON.stringify(snapshot.signatories)));
+  };
+
   const commitHistorySnapshot = (nextElements = elements, nextGlobalData = globalData, nextAwardees = awardees, nextSignatories = signatories) => {
     if (currentAwardee.hasCustomLayout) return;
     const snapshot = createHistorySnapshot(nextElements, nextGlobalData, nextAwardees, nextSignatories);
@@ -387,7 +404,7 @@ export default function CertificateGenerator() {
     updatedHistory.push(snapshot);
     setHistory(updatedHistory);
     setHistoryIndex(updatedHistory.length - 1);
-    setElements(JSON.parse(JSON.stringify(snapshot.elements)));
+    applySnapshotToState(snapshot);
   };
 
   const pushHistory = (newElements, nextGlobalData = globalData, nextAwardees = awardees, nextSignatories = signatories) => {
@@ -400,32 +417,116 @@ export default function CertificateGenerator() {
       updatedHistory.push(snapshot);
       setHistory(updatedHistory);
       setHistoryIndex(updatedHistory.length - 1);
-      setElements(JSON.parse(JSON.stringify(snapshot.elements)));
+      applySnapshotToState(snapshot);
     }
   };
 
   const handleUndo = () => {
     if (!currentAwardee.hasCustomLayout && historyIndex > 0) {
       const prevIndex = historyIndex - 1;
-      const snapshot = history[prevIndex];
       setHistoryIndex(prevIndex);
-      setElements(JSON.parse(JSON.stringify(snapshot.elements)));
-      setGlobalData(JSON.parse(JSON.stringify(snapshot.globalData)));
-      setAwardees(JSON.parse(JSON.stringify(snapshot.awardees)));
-      setSignatories(JSON.parse(JSON.stringify(snapshot.signatories)));
+      applySnapshotToState(history[prevIndex]);
+      setEditingElementId(null);
     }
   };
 
   const handleRedo = () => {
     if (!currentAwardee.hasCustomLayout && historyIndex < history.length - 1) {
       const nextIndex = historyIndex + 1;
-      const snapshot = history[nextIndex];
       setHistoryIndex(nextIndex);
-      setElements(JSON.parse(JSON.stringify(snapshot.elements)));
-      setGlobalData(JSON.parse(JSON.stringify(snapshot.globalData)));
-      setAwardees(JSON.parse(JSON.stringify(snapshot.awardees)));
-      setSignatories(JSON.parse(JSON.stringify(snapshot.signatories)));
+      applySnapshotToState(history[nextIndex]);
+      setEditingElementId(null);
     }
+  };
+
+  const applyActiveElementsLive = (updated) => {
+    activeElementsRef.current = updated;
+    if (currentAwardee.hasCustomLayout) {
+      setAwardees(prev => prev.map((a, idx) => (
+        idx === currentAwardeeIdx ? { ...a, customElements: updated } : a
+      )));
+    } else {
+      setElements(updated);
+    }
+  };
+
+  const stripHtml = (html) => {
+    if (!html || typeof html !== 'string') return '';
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    return tmp.textContent || tmp.innerText || '';
+  };
+
+  const getEditableText = (el) => {
+    if (!el) return '';
+    if (el.key === 'awardeeName') return awardees[currentAwardeeIdx]?.name || '';
+    if (el.key === 'awardeePosition') return awardees[currentAwardeeIdx]?.position || '';
+    if (el.key && el.key in globalData) return globalData[el.key] || '';
+    if (el.sigId) {
+      const sig = activeSignatories.find(s => s.id === el.sigId);
+      return sig?.[el.sigField] || '';
+    }
+    if (el.type === 'qrcode') return el.data || '';
+    return el.text ?? '';
+  };
+
+  const placeCaretAtOffset = (node, offset, selectWord = false) => {
+    const sel = window.getSelection();
+    if (!sel || !node) return;
+
+    const text = node.textContent || '';
+    const safeOffset = offset == null ? 0 : Math.max(0, Math.min(offset, text.length));
+
+    node.focus();
+
+    const textNode = node.firstChild;
+    const range = document.createRange();
+
+    if (textNode?.nodeType === Node.TEXT_NODE) {
+      range.setStart(textNode, safeOffset);
+      range.collapse(true);
+
+      if (selectWord && text.length > 0) {
+        let start = safeOffset;
+        let end = safeOffset;
+        while (start > 0 && /\S/.test(text[start - 1])) start -= 1;
+        while (end < text.length && /\S/.test(text[end])) end += 1;
+        if (start === end && safeOffset < text.length) {
+          end = Math.min(text.length, safeOffset + 1);
+        }
+        range.setStart(textNode, start);
+        range.setEnd(textNode, end);
+      }
+    } else {
+      range.selectNodeContents(node);
+      range.collapse(safeOffset > 0);
+    }
+
+    sel.removeAllRanges();
+    sel.addRange(range);
+  };
+
+  const getCaretOffsetFromPoint = (node, x, y) => {
+    if (!node) return null;
+
+    let range = null;
+    if (typeof document.caretRangeFromPoint === 'function') {
+      range = document.caretRangeFromPoint(x, y);
+    } else if (typeof document.caretPositionFromPoint === 'function') {
+      const pos = document.caretPositionFromPoint(x, y);
+      if (pos) {
+        range = document.createRange();
+        range.setStart(pos.offsetNode, pos.offset);
+        range.collapse(true);
+      }
+    }
+
+    if (!range || !node.contains(range.startContainer)) return null;
+
+    const preRange = document.createRange();
+    preRange.selectNodeContents(node);
+    preRange.setEnd(range.startContainer, range.startOffset);
+    return preRange.toString().length;
   };
 
   const [selectedIds, setSelectedIds] = useState([]);
@@ -434,61 +535,44 @@ export default function CertificateGenerator() {
   const [marquee, setMarquee] = useState(null); 
   const dragStartRef = useRef({ clickX: 0, clickY: 0, initialPositions: {} });
   const resizeStartRef = useRef({ startX: 0, startWidth: 50, startElementWidth: 180 });
-  const clientCoordsRef = useRef(null);
+  const pendingEditRef = useRef(null);
   const editingNodeRef = useRef(null);
 
   useEffect(() => {
-    if (!editingElementId) {
-      clientCoordsRef.current = null;
-      return;
-    }
+    if (!editingElementId) return;
 
-    setTimeout(() => {
-      try {
-        const sel = window.getSelection();
-        if (!sel) return;
+    const pending = pendingEditRef.current;
+    if (!pending || pending.elementId !== editingElementId) return;
 
-        const el = activeElements.find(a => a.id === editingElementId);
-        if (!el) return;
+    pendingEditRef.current = null;
+    let cancelled = false;
 
-        const node = editingNodeRef.current;
-        if (!node) return;
+    const initEditor = () => {
+      if (cancelled) return;
+      const node = editingNodeRef.current;
+      if (!node) return;
 
-        // Initialize content once to avoid React overwriting selection
-        node.innerHTML = getElementText(el);
-        node.focus();
+      node.textContent = pending.text;
+      placeCaretAtOffset(node, pending.caretOffset, pending.selectWord);
+    };
 
-        const coords = clientCoordsRef.current;
-        if (!coords) return;
+    const frame = requestAnimationFrame(() => {
+      requestAnimationFrame(initEditor);
+    });
 
-        let range = null;
-        if (typeof document.caretRangeFromPoint === 'function') {
-          range = document.caretRangeFromPoint(coords.x, coords.y);
-        } else if (typeof document.caretPositionFromPoint === 'function') {
-          const pos = document.caretPositionFromPoint(coords.x, coords.y);
-          if (pos) {
-            range = document.createRange();
-            range.setStart(pos.offsetNode, pos.offset);
-            range.collapse(true);
-          }
-        }
-
-        if (range) {
-          sel.removeAllRanges();
-          sel.addRange(range);
-        }
-      } catch (err) {
-        // ignore
-      } finally {
-        clientCoordsRef.current = null;
-      }
-    }, 0);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+    };
   }, [editingElementId]);
 
   const [canvasScale, setCanvasScale] = useState(1);
   const [zoomMultiplier, setZoomMultiplier] = useState(1);
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
+  const imageUploadRef = useRef(null);
+
+  const TEXT_STYLE_KEYS = ['font', 'fontSize', 'color', 'bold', 'italic', 'underline', 'align', 'maxWidth'];
 
   const {
     isExporting,
@@ -547,9 +631,15 @@ export default function CertificateGenerator() {
     };
   }, [canvasSize]);
 
-  const zoomIn = () => setZoomMultiplier(prev => Math.min(2.5, prev + 0.15));
-  const zoomOut = () => setZoomMultiplier(prev => Math.max(0.4, prev - 0.15));
+  const zoomIn = () => setZoomMultiplier(prev => Math.min(2.5, +(prev + 0.1).toFixed(2)));
+  const zoomOut = () => setZoomMultiplier(prev => Math.max(0.4, +(prev - 0.1).toFixed(2)));
   const resetZoom = () => setZoomMultiplier(1);
+  const displayScale = canvasScale * zoomMultiplier;
+  const getCanvasRectScale = () => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect?.width) return displayScale;
+    return rect.width / canvasSize.width;
+  };
 
   const selectAllElements = () => {
     setSelectedIds(activeElements.map(el => el.id));
@@ -559,13 +649,13 @@ export default function CertificateGenerator() {
     let widthPct = 10;
     if (el.type === 'text') {
       widthPct = el.maxWidth || 50;
-    } else if (el.type === 'line' || el.type === 'logo') {
+    } else if (el.type === 'line' || el.type === 'logo' || el.type === 'image') {
       widthPct = ((el.width || 100) / canvasSize.width) * 100;
     } else if (el.type === 'qrcode') {
       widthPct = ((el.size || 100) / canvasSize.width) * 100;
     }
 
-    const anchor = el.type === 'logo' || el.align === 'center'
+    const anchor = el.type === 'logo' || el.type === 'image' || el.align === 'center'
       ? 'center'
       : (el.type === 'text' && el.align === 'right' ? 'right' : 'left');
     let left, center, right;
@@ -823,11 +913,7 @@ export default function CertificateGenerator() {
     const activeId = selectedIds[selectedIds.length - 1];
     if (!activeId) return;
     const updated = activeElements.map(el => el.id === activeId ? { ...el, [key]: value } : el);
-    if (currentAwardee.hasCustomLayout) {
-      setAwardees(prev => prev.map((a, idx) => idx === currentAwardeeIdx ? { ...a, customElements: updated } : a));
-    } else {
-      setElements(updated);
-    }
+    applyActiveElementsLive(updated);
   };
 
   const handleTextAlign = (alignValue) => {
@@ -956,6 +1042,91 @@ export default function CertificateGenerator() {
       selectedIds.includes(el.id) ? { ...el, locked: anyUnlocked } : el
     );
     pushHistory(updated);
+  };
+
+  const copyTextStyle = () => {
+    const activeId = selectedIds[selectedIds.length - 1];
+    const el = activeElements.find(item => item.id === activeId);
+    if (!el || el.type !== 'text') return;
+    const style = TEXT_STYLE_KEYS.reduce((acc, key) => ({ ...acc, [key]: el[key] }), {});
+    setCopiedTextStyle(style);
+  };
+
+  const pasteTextStyle = () => {
+    if (!copiedTextStyle) return;
+    const updated = activeElements.map(el => {
+      if (selectedIds.includes(el.id) && el.type === 'text') {
+        return { ...el, ...copiedTextStyle };
+      }
+      return el;
+    });
+    pushHistory(updated);
+  };
+
+  const handleBulkEditSave = (rows) => {
+    const editHeaders = getBulkEditHeaders(csvHeaders, awardees);
+    const updatedAwardees = bulkEditRowsToAwardees(rows, editHeaders, awardees);
+    if (updatedAwardees.length === 0) {
+      alert('Add at least one awardee with a name or other field.');
+      return false;
+    }
+
+    const newElements = ensureAwardeeFieldElements(activeElements, editHeaders);
+    const nextElements = newElements.length ? [...activeElements, ...newElements] : activeElements;
+    const addedCount = updatedAwardees.length - awardees.length;
+    const nextIdx = addedCount > 0
+      ? updatedAwardees.length - 1
+      : Math.min(currentAwardeeIdx, updatedAwardees.length - 1);
+
+    setCsvHeaders(editHeaders);
+
+    if (currentAwardee.hasCustomLayout) {
+      setAwardees(updatedAwardees.map((awardee, idx) => {
+        if (idx !== currentAwardeeIdx || newElements.length === 0) return awardee;
+        return {
+          ...awardee,
+          customElements: [...(awardee.customElements || activeElements), ...newElements],
+        };
+      }));
+      setCurrentAwardeeIdx(nextIdx);
+      setSidebarPage(Math.floor(nextIdx / itemsPerPage));
+      return true;
+    }
+
+    if (newElements.length) {
+      pushHistory(nextElements, globalData, updatedAwardees, signatories);
+    } else {
+      commitHistorySnapshot(elements, globalData, updatedAwardees, signatories);
+    }
+
+    setCurrentAwardeeIdx(nextIdx);
+    setSidebarPage(Math.floor(nextIdx / itemsPerPage));
+    return true;
+  };
+
+  const addImageElement = (src) => {
+    const newEl = {
+      id: `custom_image_${Date.now()}`,
+      type: 'image',
+      label: 'Image / Seal',
+      src,
+      x: 50,
+      y: 40,
+      width: 120,
+      visible: true,
+    };
+    const updated = [...activeElements, newEl];
+    pushHistory(updated);
+    setSelectedIds([newEl.id]);
+  };
+
+  const handleImageElementUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    const reader = new FileReader();
+    reader.onload = (event) => addImageElement(event.target.result);
+    reader.readAsDataURL(file);
   };
 
   const exportAwardeesCsv = () => {
@@ -1181,13 +1352,25 @@ export default function CertificateGenerator() {
           return el;
         });
 
-        pushHistory(updated);
+        applyActiveElementsLive(updated);
+        arrowNudgeActiveRef.current = true;
         return;
       }
     };
 
+    const handleKeyUp = (e) => {
+      if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+      if (!arrowNudgeActiveRef.current) return;
+      arrowNudgeActiveRef.current = false;
+      pushHistory(activeElementsRef.current);
+    };
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
   }, [selectedIds, historyIndex, history, currentAwardeeIdx, currentAwardee.hasCustomLayout, activeElements, projectName, editingElementId]);
 
   const getRenderedText = (element, awardee = {}) => {
@@ -1248,11 +1431,12 @@ export default function CertificateGenerator() {
 
   const saveInlineEdit = (el, val) => {
     setEditingElementId(null);
+    const cleanVal = stripHtml(val);
 
     if (el.key === 'awardeeName') {
       const updatedAwardees = awardees.map((a, idx) => {
         if (idx === currentAwardeeIdx) {
-          return { ...a, name: val, csvData: { ...(a.csvData || {}), Name: val } };
+          return { ...a, name: cleanVal, csvData: { ...(a.csvData || {}), Name: cleanVal } };
         }
         return a;
       });
@@ -1264,7 +1448,7 @@ export default function CertificateGenerator() {
     if (el.key === 'awardeePosition') {
       const updatedAwardees = awardees.map((a, idx) => {
         if (idx === currentAwardeeIdx) {
-          return { ...a, position: val, csvData: { ...(a.csvData || {}), Position: val } };
+          return { ...a, position: cleanVal, csvData: { ...(a.csvData || {}), Position: cleanVal } };
         }
         return a;
       });
@@ -1274,8 +1458,8 @@ export default function CertificateGenerator() {
     }
 
     if (el.key) {
-      const updatedGlobalData = { ...globalData, [el.key]: val };
-      const updatedElements = updateElementByKeyOrSig({ key: el.key }, val, {
+      const updatedGlobalData = { ...globalData, [el.key]: cleanVal };
+      const updatedElements = updateElementByKeyOrSig({ key: el.key }, cleanVal, {
         x: el.x || 50,
         y: el.y || 50,
         fontSize: el.fontSize || 20,
@@ -1292,7 +1476,7 @@ export default function CertificateGenerator() {
     }
 
     if (el.sigId) {
-      const updatedSignatories = activeSignatories.map(s => s.id === el.sigId ? { ...s, [el.sigField]: val } : s);
+      const updatedSignatories = activeSignatories.map(s => s.id === el.sigId ? { ...s, [el.sigField]: cleanVal } : s);
       if (currentAwardee.hasCustomLayout) {
         setAwardees(prev => prev.map((a, idx) => idx === currentAwardeeIdx ? { ...a, customSignatories: updatedSignatories } : a));
       } else {
@@ -1302,7 +1486,7 @@ export default function CertificateGenerator() {
       return;
     }
 
-    const updated = activeElements.map(item => item.id === el.id ? { ...item, text: val } : item);
+    const updated = activeElements.map(item => item.id === el.id ? { ...item, text: cleanVal } : item);
     pushHistory(updated);
   };
 
@@ -1319,6 +1503,7 @@ export default function CertificateGenerator() {
   const handleElementPointerDown = (e, id) => {
     if (editingElementId === id) return;
     e.stopPropagation();
+    setMarquee(null);
     const targetEl = activeElements.find(el => el.id === id);
     let newSelectedIds = [...selectedIds];
 
@@ -1388,31 +1573,21 @@ export default function CertificateGenerator() {
       if (el) {
         const dx = e.clientX - resizeStartRef.current.startX;
         if (el.type === 'text') {
-          const containerWidth = canvasRef.current ? canvasRef.current.clientWidth : canvasSize.width;
-          const deltaPercent = (dx / (containerWidth * canvasScale * zoomMultiplier)) * 100;
+          const displayWidth = canvasRef.current?.getBoundingClientRect().width || canvasSize.width * displayScale;
+          const deltaPercent = (dx / displayWidth) * 100;
           const newMaxWidth = Math.max(15, Math.min(100, resizeStartRef.current.startWidth + deltaPercent));
           const updated = activeElements.map(item => item.id === el.id ? { ...item, maxWidth: newMaxWidth } : item);
-          if (currentAwardee.hasCustomLayout) {
-            setAwardees(prev => prev.map((a, idx) => idx === currentAwardeeIdx ? { ...a, customElements: updated } : a));
-          } else {
-            setElements(updated);
-          }
-        } else if (el.type === 'line' || el.type === 'logo') {
-          const newWidth = Math.max(30, resizeStartRef.current.startElementWidth + dx);
+          applyActiveElementsLive(updated);
+        } else if (el.type === 'line' || el.type === 'logo' || el.type === 'image') {
+          const logicalScale = getCanvasRectScale();
+          const newWidth = Math.max(30, resizeStartRef.current.startElementWidth + dx / logicalScale);
           const updated = activeElements.map(item => item.id === el.id ? { ...item, width: newWidth } : item);
-          if (currentAwardee.hasCustomLayout) {
-            setAwardees(prev => prev.map((a, idx) => idx === currentAwardeeIdx ? { ...a, customElements: updated } : a));
-          } else {
-            setElements(updated);
-          }
+          applyActiveElementsLive(updated);
         } else if (el.type === 'qrcode') {
-          const newSize = Math.max(50, Math.min(300, (resizeStartRef.current.startElementWidth || 90) + dx));
+          const logicalScale = getCanvasRectScale();
+          const newSize = Math.max(50, Math.min(300, (resizeStartRef.current.startElementWidth || 90) + dx / logicalScale));
           const updated = activeElements.map(item => item.id === el.id ? { ...item, size: newSize } : item);
-          if (currentAwardee.hasCustomLayout) {
-            setAwardees(prev => prev.map((a, idx) => idx === currentAwardeeIdx ? { ...a, customElements: updated } : a));
-          } else {
-            setElements(updated);
-          }
+          applyActiveElementsLive(updated);
         }
       }
       return;
@@ -1471,12 +1646,7 @@ export default function CertificateGenerator() {
     });
 
     setSnapStatus({ x: isNearCenterX, y: isNearCenterY });
-
-    if (currentAwardee.hasCustomLayout) {
-      setAwardees(prev => prev.map((a, idx) => idx === currentAwardeeIdx ? { ...a, customElements: updated } : a));
-    } else {
-      setElements(updated);
-    }
+    applyActiveElementsLive(updated);
   };
 
   const handlePointerUp = () => {
@@ -1510,7 +1680,11 @@ export default function CertificateGenerator() {
       }
     }
 
-    if (isDragging || isResizing || marquee) pushHistory(activeElements);
+    const wasTransforming = isDragging || isResizing;
+    if (wasTransforming) {
+      pushHistory(activeElementsRef.current);
+    }
+
     setIsDragging(false);
     setIsResizing(false);
     setMarquee(null);
@@ -1585,84 +1759,19 @@ export default function CertificateGenerator() {
 
     setCsvHeaders(headers);
 
-    const awardeeNameMissing = !activeElements.some(el => el.key === 'awardeeName');
-    const awardeePositionMissing = !activeElements.some(el => el.key === 'awardeePosition');
-    const existingDynamicHeaders = extractDynamicHeadersFromElements(activeElements);
-    const customHeaders = getCustomCsvHeaders(headers, existingDynamicHeaders);
-
-    const customElements = customHeaders.map((header, idx) => ({
-      id: `field_csv_${Date.now()}_${idx}`,
-      type: 'text',
-      text: `{{${header}}}`,
-      label: header,
-      x: 50,
-      y: 58 + idx * 8,
-      font: 'Inter',
-      fontSize: 20,
-      color: '#1f2937',
-      bold: false,
-      italic: false,
-      underline: false,
-      align: 'center',
-      maxWidth: 80,
-      visible: true,
-    }));
-
-    const placeholderElements = [];
-    if (awardeeNameMissing) {
-      placeholderElements.push({
-        id: `field_awardeeName_${Date.now()}`,
-        type: 'text',
-        key: 'awardeeName',
-        label: 'Awardee Name',
-        text: '',
-        x: 50,
-        y: 30,
-        font: 'Cinzel',
-        fontSize: 32,
-        color: '#1f2937',
-        bold: true,
-        italic: false,
-        underline: false,
-        align: 'center',
-        maxWidth: 80,
-        visible: true,
-      });
-    }
-
-    if (awardeePositionMissing) {
-      placeholderElements.push({
-        id: `field_awardeePosition_${Date.now()}`,
-        type: 'text',
-        key: 'awardeePosition',
-        label: 'Awardee Position',
-        text: '',
-        x: 50,
-        y: 40,
-        font: 'Montserrat',
-        fontSize: 20,
-        color: '#1f2937',
-        bold: true,
-        italic: false,
-        underline: false,
-        align: 'center',
-        maxWidth: 80,
-        visible: true,
-      });
-    }
+    const newElements = ensureAwardeeFieldElements(activeElements, headers);
 
     setAwardees(parsed);
     setCurrentAwardeeIdx(0);
 
-    if (placeholderElements.length || customElements.length) {
-      const allNewElements = [...placeholderElements, ...customElements];
+    if (newElements.length) {
       if (currentAwardee.hasCustomLayout) {
         setAwardees(prev => prev.map((a, idx) => {
           if (idx !== currentAwardeeIdx) return a;
-          return { ...a, customElements: [...(a.customElements || []), ...allNewElements] };
+          return { ...a, customElements: [...(a.customElements || activeElements), ...newElements] };
         }));
       } else {
-        pushHistory([...activeElements, ...allNewElements]);
+        pushHistory([...activeElements, ...newElements], globalData, parsed, signatories);
       }
     }
 
@@ -1850,6 +1959,13 @@ export default function CertificateGenerator() {
         isExporting={isExporting}
       />
       <DocsModal isOpen={isDocsModalOpen && isEditorLaunched} onClose={() => setIsDocsModalOpen(false)} />
+      <AwardeeBulkEditModal
+        isOpen={isBulkEditOpen}
+        onClose={() => setIsBulkEditOpen(false)}
+        awardees={awardees}
+        csvHeaders={csvHeaders}
+        onSave={handleBulkEditSave}
+      />
 
       {/* TOP MENU BAR (Hidden in Preview Mode) */}
       {!isPreviewMode && (
@@ -2011,10 +2127,12 @@ export default function CertificateGenerator() {
 
                   {/* Awardees List with Search & Pagination */}
                   <div className="space-y-3">
-                    <div className="flex justify-between items-center">
+                    <div className="space-y-2">
                       <div className="flex items-center gap-1.5">
-                        <h3 className="text-xs font-bold text-purple-900 uppercase tracking-wider">Awardees List ({awardees.length})</h3>
-                        <button 
+                        <h3 className="text-xs font-bold text-purple-900 uppercase tracking-wider">
+                          Awardees List ({awardees.length})
+                        </h3>
+                        <button
                           onClick={() => setIsCsvModalOpen(true)}
                           className="text-purple-600 hover:text-purple-800 p-0.5 rounded-full hover:bg-purple-100 transition"
                           title="Click to view Dynamic CSV Mapping instructions"
@@ -2023,16 +2141,29 @@ export default function CertificateGenerator() {
                         </button>
                       </div>
 
-                      <div className="flex items-center gap-1.5">
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <button
+                          onClick={() => setIsBulkEditOpen(true)}
+                          className="flex items-center justify-center gap-1 px-2 py-2 text-[10px] font-bold bg-purple-600 hover:bg-purple-700 text-white border border-purple-700 rounded-lg transition shadow-sm whitespace-nowrap"
+                          title="Bulk edit or add awardees in a spreadsheet"
+                        >
+                          <Table2 size={13} className="shrink-0" />
+                          <span>Bulk</span>
+                        </button>
                         <button
                           onClick={exportAwardeesCsv}
-                          className="text-xs bg-white hover:bg-purple-50 text-purple-900 border border-purple-200 px-2.5 py-1 rounded-md flex items-center gap-1 font-semibold transition shadow-sm"
+                          className="flex items-center justify-center gap-1 px-2 py-2 text-[10px] font-bold bg-white hover:bg-purple-50 text-purple-900 border border-purple-200 rounded-lg transition shadow-sm whitespace-nowrap"
                           title="Export awardee data as CSV"
                         >
-                          <Download size={12} className="text-purple-600" /> Export CSV
+                          <Download size={13} className="shrink-0 text-purple-600" />
+                          <span>Export</span>
                         </button>
-                        <label className="text-xs bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 px-2.5 py-1 rounded-md cursor-pointer flex items-center gap-1 font-semibold transition shadow-sm">
-                          <Upload size={12} className="text-purple-600" /> CSV Import
+                        <label
+                          className="flex items-center justify-center gap-1 px-2 py-2 text-[10px] font-bold bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 rounded-lg cursor-pointer transition shadow-sm whitespace-nowrap"
+                          title="Import awardees from CSV file"
+                        >
+                          <Upload size={13} className="shrink-0 text-purple-600" />
+                          <span>Import</span>
                           <input type="file" accept=".csv" onChange={handleCSVImport} className="hidden" />
                         </label>
                       </div>
@@ -2438,41 +2569,6 @@ export default function CertificateGenerator() {
                       </div>
                     )}
                   </div>
-
-                  <div className="space-y-2 pt-2 border-t border-purple-100">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-bold text-purple-900 uppercase tracking-wider block">Canvas Tools</label>
-                      <button 
-                        onClick={() => setIsQrModalOpen(true)}
-                        className="text-purple-600 hover:text-purple-800 p-0.5 rounded-full hover:bg-purple-100 transition flex items-center gap-1 text-[11px] font-semibold"
-                        title="Click to view QR Code instructions"
-                      >
-                        <Info className="w-4 h-4" /> QR Guide
-                      </button>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <div className="flex gap-2">
-                        <button 
-                          onClick={addTextElement}
-                          className="flex-1 py-2 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg text-xs font-bold text-purple-900 flex items-center justify-center gap-1 transition shadow-sm"
-                        >
-                          <Plus size={14} /> Add Text Box
-                        </button>
-                        <button 
-                          onClick={addLineElement}
-                          className="flex-1 py-2 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg text-xs font-bold text-purple-900 flex items-center justify-center gap-1 transition shadow-sm"
-                        >
-                          <Minus size={14} /> Add Line Tool
-                        </button>
-                      </div>
-                      <button 
-                        onClick={addQRCodeElement}
-                        className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition shadow-sm"
-                      >
-                        <QrCode size={14} /> Add QR Code Element
-                      </button>
-                    </div>
-                  </div>
                 </div>
               )}
 
@@ -2486,7 +2582,7 @@ export default function CertificateGenerator() {
                     {activeElements.slice().reverse().map((el, revIdx) => {
                       const actualIdx = activeElements.length - 1 - revIdx;
                       const isSelected = selectedIds.includes(el.id);
-                      const displayName = el.label || el.key || (el.type === 'line' ? 'Horizontal Line' : (el.type === 'qrcode' ? 'QR Code' : (el.text ? el.text.substring(0, 20) : el.id)));
+                      const displayName = el.label || el.key || (el.type === 'line' ? 'Horizontal Line' : (el.type === 'qrcode' ? 'QR Code' : (el.type === 'image' ? 'Image / Seal' : (el.text ? el.text.substring(0, 20) : el.id))));
                       
                       return (
                         <div 
@@ -2583,27 +2679,28 @@ export default function CertificateGenerator() {
 
           {/* FIXED HEIGHT CANVAS TOOLBAR */}
           {!isPreviewMode && (
-            <div className="h-14 shrink-0 border-b border-purple-200 bg-white/95 backdrop-blur px-4 flex items-center justify-between gap-3 z-20 shadow-sm overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="h-14 shrink-0 border-b border-purple-200 bg-white/95 backdrop-blur px-3 flex items-center justify-between gap-2 z-20 shadow-sm overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
 
-              {/* Left Section: Awardee Navigation */}
-              <div className="flex items-center gap-2 shrink-0 whitespace-nowrap">
-                <div className="flex items-center gap-1 bg-purple-50/80 border border-purple-200 rounded-lg px-1.5 py-1 shadow-sm shrink-0 whitespace-nowrap">
-                  <button 
+              {/* Left: Awardee nav + canvas tools */}
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-0.5 bg-purple-50/80 border border-purple-200 rounded-lg px-1 py-1 shadow-sm">
+                  <button
                     onClick={() => setCurrentAwardeeIdx(prev => Math.max(0, prev - 1))}
                     disabled={currentAwardeeIdx === 0}
-                    className="p-1 hover:bg-purple-100 rounded text-zinc-700 disabled:opacity-30 transition"
-                    title="Previous Awardee"
+                    className="p-1.5 hover:bg-purple-100 rounded text-zinc-700 disabled:opacity-30 transition"
+                    title="Previous awardee"
                   >
                     <ChevronLeft size={14} />
                   </button>
 
-                  <div className="relative shrink-0">
-                    <button 
+                  <div className="relative">
+                    <button
                       onClick={() => setIsAwardeeDropdownOpen(prev => !prev)}
-                      className="text-xs text-purple-900 font-bold px-2 hover:bg-purple-100 rounded-md flex items-center gap-1 py-0.5 transition"
-                      title="Click to search and jump to awardee"
+                      className="text-[11px] text-purple-900 font-bold px-1.5 hover:bg-purple-100 rounded flex items-center gap-0.5 py-1 transition whitespace-nowrap"
+                      title={`Awardee ${currentAwardeeIdx + 1} of ${awardees.length} — click to search`}
                     >
-                      Awardee {currentAwardeeIdx + 1} of {awardees.length} ▾
+                      {currentAwardeeIdx + 1}/{awardees.length}
+                      <ChevronDown size={12} className="text-purple-600" />
                     </button>
 
                     <AwardeeDropdown
@@ -2617,61 +2714,125 @@ export default function CertificateGenerator() {
                     />
                   </div>
 
-                  <button 
+                  <button
                     onClick={() => setCurrentAwardeeIdx(prev => Math.min(awardees.length - 1, prev + 1))}
                     disabled={currentAwardeeIdx === awardees.length - 1}
-                    className="p-1 hover:bg-purple-100 rounded text-zinc-700 disabled:opacity-30 transition"
-                    title="Next Awardee"
+                    className="p-1.5 hover:bg-purple-100 rounded text-zinc-700 disabled:opacity-30 transition"
+                    title="Next awardee"
                   >
                     <ChevronRight size={14} />
                   </button>
                 </div>
+
+                <div className="flex items-center gap-0.5 border border-purple-200 rounded-lg px-1 py-1 bg-white shadow-sm">
+                  <button
+                    onClick={addTextElement}
+                    className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 rounded transition"
+                    title="Add text box"
+                  >
+                    <Type size={14} />
+                  </button>
+                  <button
+                    onClick={addLineElement}
+                    className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 rounded transition"
+                    title="Add horizontal line"
+                  >
+                    <Minus size={14} />
+                  </button>
+                  <button
+                    onClick={addQRCodeElement}
+                    className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 rounded transition"
+                    title="Add QR code"
+                  >
+                    <QrCode size={14} />
+                  </button>
+                  <label
+                    className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 rounded transition cursor-pointer"
+                    title="Add image or seal"
+                  >
+                    <Stamp size={14} />
+                    <input ref={imageUploadRef} type="file" accept="image/*" onChange={handleImageElementUpload} className="hidden" />
+                  </label>
+                  <div className="h-4 w-px bg-purple-200" />
+                  <button
+                    onClick={() => setIsQrModalOpen(true)}
+                    className="p-1.5 text-purple-600 hover:text-purple-800 hover:bg-purple-50 rounded transition"
+                    title="QR code guide"
+                  >
+                    <Info size={14} />
+                  </button>
+                </div>
               </div>
 
-              {/* Right Section: Global Actions */}
-              <div className="flex items-center gap-2 shrink-0 whitespace-nowrap">
-                <button 
-                  onClick={() => setShowGuides(prev => !prev)}
-                  className={`px-2.5 py-1.5 border rounded-lg text-xs flex items-center gap-1 shrink-0 whitespace-nowrap transition font-bold shadow-sm ${showGuides ? 'bg-purple-100 border-purple-400 text-purple-950' : 'bg-white border-purple-200 text-zinc-600 hover:bg-purple-50'}`}
-                  title="Toggle Ruler Guides"
-                >
-                  <Grid size={13} className="text-purple-600" />
-                  <span className="hidden sm:inline">Guides</span>
-                </button>
+              {/* Right: view, export, history, zoom */}
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-0.5 border border-purple-200 rounded-lg px-1 py-1 bg-white shadow-sm">
+                  <button
+                    onClick={() => setShowGuides(prev => !prev)}
+                    className={`p-1.5 rounded transition ${showGuides ? 'bg-purple-100 text-purple-800' : 'text-zinc-700 hover:text-purple-700 hover:bg-purple-50'}`}
+                    title="Toggle ruler guides"
+                  >
+                    <Grid size={14} />
+                  </button>
+                  <button
+                    onClick={() => setIsPreviewMode(true)}
+                    className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 rounded transition"
+                    title="Full-screen preview"
+                  >
+                    <Maximize2 size={14} />
+                  </button>
+                  <button
+                    onClick={exportTestPdf}
+                    disabled={isExporting || awardees.length === 0}
+                    className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 rounded transition disabled:opacity-30"
+                    title="Export PDF for current awardee"
+                  >
+                    <Download size={14} />
+                  </button>
+                </div>
 
-                <button 
-                  onClick={() => setIsPreviewMode(true)}
-                  className="px-2.5 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 rounded-lg text-xs flex items-center gap-1.5 shrink-0 whitespace-nowrap transition font-bold shadow-sm"
-                  title="Toggle Full-Screen Preview"
-                >
-                  <Maximize2 size={13} className="text-purple-600" />
-                  <span className="hidden sm:inline">Preview</span>
-                </button>
-
-                <div className="flex items-center gap-1 border border-purple-200 rounded-lg px-1.5 py-1 bg-white shadow-sm shrink-0 whitespace-nowrap">
-                  <button 
-                    onClick={handleUndo} 
-                    disabled={historyIndex === 0 || currentAwardee.hasCustomLayout} 
-                    className="p-1 hover:bg-purple-50 rounded text-zinc-700 disabled:opacity-30 transition" 
+                <div className="flex items-center gap-0.5 border border-purple-200 rounded-lg px-1 py-1 bg-white shadow-sm">
+                  <button
+                    onClick={handleUndo}
+                    disabled={historyIndex === 0 || currentAwardee.hasCustomLayout}
+                    className="p-1.5 hover:bg-purple-50 rounded text-zinc-700 disabled:opacity-30 transition"
                     title="Undo (Ctrl+Z)"
                   >
                     <Undo2 size={14} />
                   </button>
-                  <button 
-                    onClick={handleRedo} 
-                    disabled={historyIndex >= history.length - 1 || currentAwardee.hasCustomLayout} 
-                    className="p-1 hover:bg-purple-50 rounded text-zinc-700 disabled:opacity-30 transition" 
+                  <button
+                    onClick={handleRedo}
+                    disabled={historyIndex >= history.length - 1 || currentAwardee.hasCustomLayout}
+                    className="p-1.5 hover:bg-purple-50 rounded text-zinc-700 disabled:opacity-30 transition"
                     title="Redo (Ctrl+Y)"
                   >
                     <RotateCcw size={14} className="transform scale-x-[-1]" />
                   </button>
                 </div>
 
-                <div className="h-4 w-px bg-purple-200" />
-
-                <button onClick={zoomOut} className="p-1.5 bg-white border border-purple-200 hover:bg-purple-50 rounded-lg text-zinc-700 shadow-sm transition" title="Zoom Out"><ZoomOut size={14} /></button>
-                <button onClick={resetZoom} className="text-xs font-bold text-purple-900" title="Reset Zoom">{Math.round(zoomMultiplier * 100)}%</button>
-                <button onClick={zoomIn} className="p-1.5 bg-white border border-purple-200 hover:bg-purple-50 rounded-lg text-zinc-700 shadow-sm transition" title="Zoom In"><ZoomIn size={14} /></button>
+                <div className="flex items-center gap-0.5 border border-purple-200 rounded-lg px-1 py-1 bg-white shadow-sm">
+                  <button
+                    onClick={zoomOut}
+                    className="p-1.5 hover:bg-purple-50 rounded text-zinc-700 transition"
+                    title="Zoom out"
+                  >
+                    <ZoomOut size={14} />
+                  </button>
+                  <button
+                    onClick={resetZoom}
+                    className="px-1.5 py-1 text-[11px] font-bold text-purple-900 min-w-[2.5rem] hover:bg-purple-50 rounded transition"
+                    title="Reset zoom"
+                  >
+                    {Math.round(zoomMultiplier * 100)}%
+                  </button>
+                  <button
+                    onClick={zoomIn}
+                    className="p-1.5 hover:bg-purple-50 rounded text-zinc-700 transition"
+                    title="Zoom in"
+                  >
+                    <ZoomIn size={14} />
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -2684,6 +2845,45 @@ export default function CertificateGenerator() {
                   <button onClick={() => handleAlign('center')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-100 rounded-full transition" title="Align element center"><AlignCenter size={14} /></button>
                   <button onClick={() => handleAlign('right')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-100 rounded-full transition" title="Align element right"><AlignRight size={14} /></button>
                 </div>
+
+                {selectedIds.length >= 3 && (
+                  <div className="flex items-center gap-1 border border-purple-200 rounded-xl bg-white shadow-sm shrink-0 px-1">
+                    <button
+                      onClick={() => handleDistribute('horizontal')}
+                      className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 rounded-l-xl transition"
+                      title="Distribute horizontally (3+ elements)"
+                    >
+                      <AlignHorizontalDistributeCenter size={14} />
+                    </button>
+                    <button
+                      onClick={() => handleDistribute('vertical')}
+                      className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 rounded-r-xl transition"
+                      title="Distribute vertically (3+ elements)"
+                    >
+                      <AlignVerticalDistributeCenter size={14} />
+                    </button>
+                  </div>
+                )}
+
+                {selectedIds.length === 1 && primarySelectedElement?.type === 'text' && (
+                  <div className="flex items-center gap-1 border border-purple-200 rounded-xl bg-white shadow-sm shrink-0 px-1">
+                    <button
+                      onClick={copyTextStyle}
+                      className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 rounded-l-xl transition"
+                      title="Copy text style"
+                    >
+                      <Paintbrush size={14} />
+                    </button>
+                    <button
+                      onClick={pasteTextStyle}
+                      disabled={!copiedTextStyle}
+                      className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 rounded-r-xl transition disabled:opacity-30"
+                      title="Paste text style onto selected text"
+                    >
+                      <ClipboardPaste size={14} />
+                    </button>
+                  </div>
+                )}
 
                 {selectedIds.length === 1 && primarySelectedElement && primarySelectedElement.type === 'text' ? (
                   <>
@@ -2841,62 +3041,65 @@ export default function CertificateGenerator() {
 
           <div 
             ref={containerRef}
-            className={`flex-1 flex items-center justify-center p-12 overflow-auto relative select-none ${isPreviewMode ? 'bg-zinc-950' : 'bg-purple-50/20'}`}
+            className={`flex-1 flex items-center justify-center p-12 overflow-auto relative select-none [scrollbar-gutter:stable] ${isPreviewMode ? 'bg-zinc-950' : 'bg-purple-50/20'}`}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
           >
             <div 
               className="relative flex-shrink-0"
               style={{
-                width: `${canvasSize.width * canvasScale * zoomMultiplier}px`,
-                height: `${canvasSize.height * canvasScale * zoomMultiplier}px`,
+                width: Math.round(canvasSize.width * displayScale),
+                height: Math.round(canvasSize.height * displayScale),
               }}
             >
-              
-              {!isPreviewMode && showGuides && (
-                <div 
-                  className="absolute -top-6 left-0 right-0 h-5 bg-white border-b border-purple-200 flex items-center cursor-ns-resize z-20 shadow-sm"
-                  onMouseDown={(e) => {
-                    if (!canvasRef.current) return;
-                    const rect = canvasRef.current.getBoundingClientRect();
-                    const yPct = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
-                    setGuides(prev => ({ ...prev, horizontal: [...prev.horizontal, yPct] }));
-                    setActiveDraggingGuide({ type: 'horizontal', index: guides.horizontal.length });
-                  }}
-                  title="Click and drag down to add a horizontal guide line"
-                >
-                  <span className="text-[9px] text-purple-800 px-1 font-mono font-bold">RULER</span>
-                </div>
-              )}
-
-              {!isPreviewMode && showGuides && (
-                <div 
-                  className="absolute -left-6 top-0 bottom-0 w-5 bg-white border-r border-purple-200 flex flex-col items-center justify-center cursor-ew-resize z-20 shadow-sm"
-                  onMouseDown={(e) => {
-                    if (!canvasRef.current) return;
-                    const rect = canvasRef.current.getBoundingClientRect();
-                    const xPct = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
-                    setGuides(prev => ({ ...prev, vertical: [...prev.vertical, xPct] }));
-                    setActiveDraggingGuide({ type: 'vertical', index: guides.vertical.length });
-                  }}
-                  title="Click and drag right to add a vertical guide line"
-                >
-                  <span className="text-[8px] text-purple-800 font-mono font-bold [writing-mode:vertical-lr]">RULER</span>
-                </div>
-              )}
-
-              <div 
-                ref={canvasRef}
-                onPointerDown={handleCanvasPointerDown}
-                className="absolute inset-0 shadow-2xl overflow-hidden cursor-crosshair rounded-sm"
+              <div
+                className="absolute top-0 left-0"
                 style={{
                   width: `${canvasSize.width}px`,
                   height: `${canvasSize.height}px`,
-                  transform: `scale(${canvasScale * zoomMultiplier})`,
+                  transform: `scale(${displayScale})`,
                   transformOrigin: 'top left',
-                  ...(bgType !== 'custom' ? PRESET_BACKGROUNDS[bgType].style : { backgroundColor: '#ffffff' })
                 }}
               >
+                {!isPreviewMode && showGuides && (
+                  <>
+                    <div 
+                      className="absolute -top-6 left-0 right-0 h-5 bg-white border-b border-purple-200 flex items-center cursor-ns-resize z-20 shadow-sm"
+                      onMouseDown={(e) => {
+                        if (!canvasRef.current) return;
+                        const rect = canvasRef.current.getBoundingClientRect();
+                        const yPct = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
+                        setGuides(prev => ({ ...prev, horizontal: [...prev.horizontal, yPct] }));
+                        setActiveDraggingGuide({ type: 'horizontal', index: guides.horizontal.length });
+                      }}
+                      title="Click and drag down to add a horizontal guide line"
+                    >
+                      <span className="text-[9px] text-purple-800 px-1 font-mono font-bold">RULER</span>
+                    </div>
+                    <div 
+                      className="absolute -left-6 top-0 bottom-0 w-5 bg-white border-r border-purple-200 flex flex-col items-center justify-center cursor-ew-resize z-20 shadow-sm"
+                      onMouseDown={(e) => {
+                        if (!canvasRef.current) return;
+                        const rect = canvasRef.current.getBoundingClientRect();
+                        const xPct = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+                        setGuides(prev => ({ ...prev, vertical: [...prev.vertical, xPct] }));
+                        setActiveDraggingGuide({ type: 'vertical', index: guides.vertical.length });
+                      }}
+                      title="Click and drag right to add a vertical guide line"
+                    >
+                      <span className="text-[8px] text-purple-800 font-mono font-bold [writing-mode:vertical-lr]">RULER</span>
+                    </div>
+                  </>
+                )}
+
+                <div 
+                  ref={canvasRef}
+                  onPointerDown={handleCanvasPointerDown}
+                  className="relative w-full h-full shadow-2xl overflow-hidden cursor-crosshair rounded-sm"
+                  style={{
+                    ...(bgType !== 'custom' ? PRESET_BACKGROUNDS[bgType].style : { backgroundColor: '#ffffff' })
+                  }}
+                >
                 {bgType === 'custom' && customBg && (
                   <img 
                     src={customBg} 
@@ -2952,7 +3155,7 @@ export default function CertificateGenerator() {
                         left: `${el.x}%`,
                         top: `${el.y}%`,
                         transform: getTextElementTransform(el),
-                        width: el.type === 'text' ? `${el.maxWidth || 80}%` : (el.type === 'line' || el.type === 'logo') ? `${el.width || 100}px` : el.type === 'qrcode' ? `${el.size || 90}px` : 'auto',
+                        width: el.type === 'text' ? `${el.maxWidth || 80}%` : (el.type === 'line' || el.type === 'logo' || el.type === 'image') ? `${el.width || 100}px` : el.type === 'qrcode' ? `${el.size || 90}px` : 'auto',
                         zIndex: isSelected ? 30 : 10
                       }}
                     >
@@ -2967,8 +3170,11 @@ export default function CertificateGenerator() {
                             ref={editingNodeRef}
                             contentEditable
                             suppressContentEditableWarning
-                            onBlur={(e) => saveInlineEdit(el, e.currentTarget.innerHTML)}
-                            onKeyDown={(e) => { if (e.key === 'Escape') saveInlineEdit(el, e.currentTarget.innerHTML); }}
+                            onBlur={(e) => saveInlineEdit(el, e.currentTarget.textContent)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Escape') saveInlineEdit(el, e.currentTarget.textContent);
+                              e.stopPropagation();
+                            }}
                             onPointerDown={(e) => e.stopPropagation()}
                             className="w-full border-2 border-purple-600 rounded p-1.5 focus:outline-none bg-white shadow-2xl selection:bg-purple-200 selection:text-purple-950"
                             style={{
@@ -2984,7 +3190,32 @@ export default function CertificateGenerator() {
                           />
                         ) : (
                           <div 
-                            onDoubleClick={(e) => { if (!isPreviewMode) { e.stopPropagation(); clientCoordsRef.current = { x: e.clientX, y: e.clientY }; setEditingElementId(el.id); } }}
+                            onDoubleClick={(e) => {
+                              if (isPreviewMode) return;
+                              e.stopPropagation();
+                              const displayNode = e.currentTarget;
+                              const displayText = displayNode.textContent || '';
+                              const editText = getEditableText(el);
+                              let caretOffset = getCaretOffsetFromPoint(displayNode, e.clientX, e.clientY);
+                              if (
+                                caretOffset != null &&
+                                displayText.length > 0 &&
+                                editText.length > 0 &&
+                                displayText !== editText
+                              ) {
+                                caretOffset = Math.min(
+                                  editText.length,
+                                  Math.round((caretOffset / displayText.length) * editText.length)
+                                );
+                              }
+                              pendingEditRef.current = {
+                                elementId: el.id,
+                                text: editText,
+                                caretOffset,
+                                selectWord: true,
+                              };
+                              setEditingElementId(el.id);
+                            }}
                             style={{
                               fontFamily: getFontFamily(el.font),
                               fontSize: `${el.fontSize}px`,
@@ -3013,6 +3244,12 @@ export default function CertificateGenerator() {
                         <img 
                           src={logoImg} 
                           alt="Institution Logo" 
+                          className="w-full h-auto object-contain pointer-events-none select-none"
+                        />
+                      ) : el.type === 'image' && el.src ? (
+                        <img
+                          src={el.src}
+                          alt={el.label || 'Certificate image'}
                           className="w-full h-auto object-contain pointer-events-none select-none"
                         />
                       ) : el.type === 'qrcode' ? (
@@ -3048,60 +3285,51 @@ export default function CertificateGenerator() {
                     }}
                   />
                 )}
-              </div>
-
-              {!isPreviewMode && showGuides && (
-                <div 
-                  className="absolute inset-0 pointer-events-none overflow-hidden"
-                  style={{
-                    transform: `scale(${canvasScale * zoomMultiplier})`,
-                    transformOrigin: 'top left',
-                    width: `${canvasSize.width}px`,
-                    height: `${canvasSize.height}px`,
-                    zIndex: 50
-                  }}
-                >
-                  {guides.horizontal.map((yVal, idx) => (
-                    <div 
-                      key={`h_guide_${idx}`}
-                      className="absolute left-0 right-0 h-[1px] bg-purple-500 border-t border-dashed border-purple-300 pointer-events-auto cursor-ns-resize group"
-                      style={{ top: `${yVal}%` }}
-                      onMouseDown={() => setActiveDraggingGuide({ type: 'horizontal', index: idx })}
-                      title="Drag guide or drag off canvas to delete"
-                    >
-                      <span className="absolute left-2 -top-3 text-[9px] bg-purple-900 text-purple-200 px-1 rounded opacity-0 group-hover:opacity-100 transition font-mono">
-                        Y: {yVal.toFixed(1)}% (Drag off to delete)
-                      </span>
-                    </div>
-                  ))}
-
-                  {guides.vertical.map((xVal, idx) => (
-                    <div 
-                      key={`v_guide_${idx}`}
-                      className="absolute top-0 bottom-0 w-[1px] bg-purple-500 border-l border-dashed border-purple-300 pointer-events-auto cursor-ew-resize group"
-                      style={{ left: `${xVal}%` }}
-                      onMouseDown={() => setActiveDraggingGuide({ type: 'vertical', index: idx })}
-                      title="Drag guide or drag off canvas to delete"
-                    >
-                      <span className="absolute top-2 -left-4 text-[9px] bg-purple-900 text-purple-200 px-1 rounded opacity-0 group-hover:opacity-100 transition font-mono [writing-mode:vertical-lr]">
-                        X: {xVal.toFixed(1)}%
-                      </span>
-                    </div>
-                  ))}
-
-                  {snapStatus.x && (
-                    <div className="absolute top-0 bottom-0 left-[50%] w-[2px] bg-purple-600 shadow-[0_0_8px_rgba(147,51,234,0.8)] pointer-events-none z-50">
-                      <span className="absolute top-4 left-1 text-[10px] bg-purple-600 text-white px-1 rounded font-bold font-mono">CENTER X</span>
-                    </div>
-                  )}
-                  {snapStatus.y && (
-                    <div className="absolute left-0 right-0 top-[50%] h-[2px] bg-purple-600 shadow-[0_0_8px_rgba(147,51,234,0.8)] pointer-events-none z-50">
-                      <span className="absolute left-4 top-1 text-[10px] bg-purple-600 text-white px-1 rounded font-bold font-mono">CENTER Y</span>
-                    </div>
-                  )}
                 </div>
-              )}
 
+                {!isPreviewMode && showGuides && (
+                  <div className="absolute inset-0 pointer-events-none overflow-visible z-50">
+                    {guides.horizontal.map((yVal, idx) => (
+                      <div 
+                        key={`h_guide_${idx}`}
+                        className="absolute left-0 right-0 h-[1px] bg-purple-500 border-t border-dashed border-purple-300 pointer-events-auto cursor-ns-resize group"
+                        style={{ top: `${yVal}%` }}
+                        onMouseDown={() => setActiveDraggingGuide({ type: 'horizontal', index: idx })}
+                        title="Drag guide or drag off canvas to delete"
+                      >
+                        <span className="absolute left-2 -top-3 text-[9px] bg-purple-900 text-purple-200 px-1 rounded opacity-0 group-hover:opacity-100 transition font-mono">
+                          Y: {yVal.toFixed(1)}% (Drag off to delete)
+                        </span>
+                      </div>
+                    ))}
+
+                    {guides.vertical.map((xVal, idx) => (
+                      <div 
+                        key={`v_guide_${idx}`}
+                        className="absolute top-0 bottom-0 w-[1px] bg-purple-500 border-l border-dashed border-purple-300 pointer-events-auto cursor-ew-resize group"
+                        style={{ left: `${xVal}%` }}
+                        onMouseDown={() => setActiveDraggingGuide({ type: 'vertical', index: idx })}
+                        title="Drag guide or drag off canvas to delete"
+                      >
+                        <span className="absolute top-2 -left-4 text-[9px] bg-purple-900 text-purple-200 px-1 rounded opacity-0 group-hover:opacity-100 transition font-mono [writing-mode:vertical-lr]">
+                          X: {xVal.toFixed(1)}%
+                        </span>
+                      </div>
+                    ))}
+
+                    {snapStatus.x && (
+                      <div className="absolute top-0 bottom-0 left-[50%] w-[2px] bg-purple-600 shadow-[0_0_8px_rgba(147,51,234,0.8)] pointer-events-none z-50">
+                        <span className="absolute top-4 left-1 text-[10px] bg-purple-600 text-white px-1 rounded font-bold font-mono">CENTER X</span>
+                      </div>
+                    )}
+                    {snapStatus.y && (
+                      <div className="absolute left-0 right-0 top-[50%] h-[2px] bg-purple-600 shadow-[0_0_8px_rgba(147,51,234,0.8)] pointer-events-none z-50">
+                        <span className="absolute left-4 top-1 text-[10px] bg-purple-600 text-white px-1 rounded font-bold font-mono">CENTER Y</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

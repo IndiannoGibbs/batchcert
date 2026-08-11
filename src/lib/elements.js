@@ -11,7 +11,7 @@ export const deduplicateElements = (els) => {
 };
 
 export const getTextElementTransform = (el) => {
-  if (el.type === 'logo' || el.align === 'center') return 'translateX(-50%)';
+  if (el.type === 'logo' || el.type === 'image' || el.align === 'center') return 'translateX(-50%)';
   if (el.type === 'text' && el.align === 'right') return 'translateX(-100%)';
   return 'none';
 };
