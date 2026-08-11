@@ -8,6 +8,7 @@ import {
   Layers, Eye, EyeOff, ArrowUp, ArrowDown, Check, X, Search, Maximize2, Minimize2, Grid,
   Maximize, Info, Tag, FileType, QrCode, HelpCircle, Sparkles, ArrowRight, Coffee, Copy, Lock, Unlock, AlertTriangle,
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, Paintbrush, ClipboardPaste, Table2, Stamp,
+  PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 import LandingPage from './components/LandingPage';
 import LoaderOverlay from './components/LoaderOverlay';
@@ -156,6 +157,8 @@ export default function CertificateGenerator() {
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [isKeyboardModalOpen, setIsKeyboardModalOpen] = useState(false);
   const [isPreviewMode, setIsPreviewMode] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [previewFitScale, setPreviewFitScale] = useState(1);
   const [showGuides, setShowGuides] = useState(false);
   const [isAwardeeDropdownOpen, setIsAwardeeDropdownOpen] = useState(false);
   const [awardeeSearchQuery, setAwardeeSearchQuery] = useState('');
@@ -615,7 +618,16 @@ export default function CertificateGenerator() {
       const { clientWidth, clientHeight } = containerRef.current;
       const targetWidth = canvasSize.width;
       const targetHeight = canvasSize.height;
-      const padding = 100;
+
+      if (isPreviewMode) {
+        const padding = 32;
+        const scaleX = (clientWidth - padding) / targetWidth;
+        const scaleY = (clientHeight - padding) / targetHeight;
+        setPreviewFitScale(Math.max(0.2, Math.min(scaleX, scaleY, 3)));
+        return;
+      }
+
+      const padding = 48;
       const scaleX = (clientWidth - padding) / targetWidth;
       const scaleY = (clientHeight - padding) / targetHeight;
       setCanvasScale(Math.min(scaleX, scaleY, 1));
@@ -629,12 +641,31 @@ export default function CertificateGenerator() {
       window.removeEventListener('resize', updateScale);
       observer.disconnect();
     };
-  }, [canvasSize]);
+  }, [canvasSize, isPreviewMode]);
+
+  useEffect(() => {
+    const media = window.matchMedia('(min-width: 1280px)');
+    const handleChange = (event) => {
+      if (!event.matches) setIsSidebarCollapsed(false);
+    };
+    media.addEventListener('change', handleChange);
+    return () => media.removeEventListener('change', handleChange);
+  }, []);
+
+  const enterPreviewMode = () => {
+    setSelectedIds([]);
+    setEditingElementId(null);
+    setIsPreviewMode(true);
+  };
+
+  const exitPreviewMode = () => {
+    setIsPreviewMode(false);
+  };
 
   const zoomIn = () => setZoomMultiplier(prev => Math.min(2.5, +(prev + 0.1).toFixed(2)));
   const zoomOut = () => setZoomMultiplier(prev => Math.max(0.4, +(prev - 0.1).toFixed(2)));
   const resetZoom = () => setZoomMultiplier(1);
-  const displayScale = canvasScale * zoomMultiplier;
+  const displayScale = isPreviewMode ? previewFitScale : canvasScale * zoomMultiplier;
   const getCanvasRectScale = () => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect?.width) return displayScale;
@@ -1189,6 +1220,7 @@ export default function CertificateGenerator() {
       width: 180,
       height: 2,
       color: '#1f2937',
+      lineStyle: 'solid',
       visible: true
     };
     const updated = [...activeElements, newEl];
@@ -1211,6 +1243,20 @@ export default function CertificateGenerator() {
     pushHistory(updated);
     setSelectedIds([newEl.id]);
   };
+
+  const getLineElementStyle = (el) => ({
+    width: '100%',
+    height: 0,
+    border: 'none',
+    borderTop: `${Math.max(1, el.height || 2)}px ${el.lineStyle || 'solid'} ${el.color || '#1f2937'}`,
+  });
+
+  const LINE_STYLE_OPTIONS = [
+    { value: 'solid', label: 'Solid' },
+    { value: 'dashed', label: 'Dashed' },
+    { value: 'dotted', label: 'Dotted' },
+    { value: 'double', label: 'Double' },
+  ];
 
   const insertTagIntoCanvas = (tagName) => {
     const tagPlaceholder = `{{${tagName}}}`;
@@ -1872,7 +1918,7 @@ export default function CertificateGenerator() {
   // CERTIFICATE GENERATOR EDITOR WORKSPACE
   // ==========================================
   return (
-    <div className="relative flex flex-col h-screen bg-white text-zinc-900 font-sans overflow-hidden select-none">
+    <div className="relative flex flex-col h-screen w-full bg-white text-zinc-900 font-sans overflow-hidden select-none">
       <LoaderOverlay
         visible={isReturningHome}
         title="Returning Home"
@@ -1984,13 +2030,16 @@ export default function CertificateGenerator() {
         />
       )}
 
-      <div className="flex flex-1 overflow-hidden relative">
+      <div className="flex flex-1 overflow-hidden relative min-w-0">
         
         {/* SIDEBAR (Hidden in Preview Mode) */}
         {!isPreviewMode && (
-          <div className="w-96 bg-white border-r border-purple-200 flex flex-col z-10 shadow-sm">
-            
-            <div className="flex border-b border-purple-100 bg-purple-50/40">
+          <div
+            className={`relative shrink-0 flex flex-col bg-white border-r border-purple-200 shadow-sm z-10 overflow-hidden transition-[width] duration-300 ease-in-out ${
+              isSidebarCollapsed ? 'w-0 border-r-0' : 'w-96'
+            }`}
+          >
+            <div className="relative flex border-b border-purple-100 bg-purple-50/40 shrink-0">
               <button 
                 onClick={() => setActiveTab('data')} 
                 className={`flex-1 py-3 text-[11px] font-bold flex flex-col items-center justify-center gap-1 border-b-2 transition ${activeTab === 'data' ? 'border-purple-600 text-purple-900 bg-white shadow-inner' : 'border-transparent text-zinc-500 hover:text-zinc-800'}`}
@@ -2015,9 +2064,17 @@ export default function CertificateGenerator() {
               >
                 <Layers size={14} className={activeTab === 'layers' ? 'text-purple-600' : ''} /> Layers
               </button>
+              <button
+                type="button"
+                onClick={() => setIsSidebarCollapsed(true)}
+                className="hidden xl:flex absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-zinc-500 hover:text-purple-800 hover:bg-purple-100 transition"
+                title="Collapse sidebar"
+              >
+                <PanelLeftClose size={15} />
+              </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-5 bg-white">
+            <div className={`flex-1 overflow-y-auto p-4 space-y-5 bg-white min-w-[24rem] ${isSidebarCollapsed ? 'invisible' : ''}`}>
 
               {/* TAB 1: DATA & AWARDEES */}
               {activeTab === 'data' && (
@@ -2631,7 +2688,7 @@ export default function CertificateGenerator() {
 
             </div>
 
-            <div className="p-4 border-t border-purple-100 bg-purple-50/40 space-y-2">
+            <div className={`p-4 border-t border-purple-100 bg-purple-50/40 space-y-2 shrink-0 min-w-[24rem] ${isSidebarCollapsed ? 'invisible' : ''}`}>
               <button 
                 onClick={openExportModal}
                 disabled={isExporting}
@@ -2649,7 +2706,7 @@ export default function CertificateGenerator() {
                 Export All as Single PDF
               </button>
             </div>
-            <div className="p-4 border-t border-gray-200 bg-gray-50">
+            <div className={`p-4 border-t border-gray-200 bg-gray-50 shrink-0 min-w-[24rem] ${isSidebarCollapsed ? 'invisible' : ''}`}>
             <a
               href="https://ko-fi.com/indiannogibbs"
               target="_blank"
@@ -2664,17 +2721,34 @@ export default function CertificateGenerator() {
           </div>
         )}
 
+        {!isPreviewMode && isSidebarCollapsed && (
+          <button
+            type="button"
+            onClick={() => setIsSidebarCollapsed(false)}
+            className="hidden xl:flex absolute left-3 top-1/2 -translate-y-1/2 z-30 p-2.5 bg-white border border-purple-200 rounded-xl text-purple-800 shadow-lg hover:bg-purple-50 transition"
+            title="Expand sidebar"
+          >
+            <PanelLeftOpen size={18} />
+          </button>
+        )}
+
         {/* WORKSPACE CANVAS WITH RULERS */}
-        <div className="flex-1 flex flex-col bg-slate-100 relative overflow-hidden">
+        <div className="flex-1 flex flex-col bg-slate-100 relative overflow-hidden min-w-0">
           
           {/* FLOATING EXIT PREVIEW BUTTON */}
           {isPreviewMode && (
             <button 
-              onClick={() => setIsPreviewMode(false)}
+              onClick={exitPreviewMode}
               className="fixed top-6 right-6 z-50 bg-white/90 text-purple-900 border border-purple-300 px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 text-xs font-bold hover:bg-white backdrop-blur transition"
             >
               <Minimize2 size={15} /> Exit Preview Mode
             </button>
+          )}
+
+          {isPreviewMode && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 px-3 py-1.5 rounded-full bg-white/10 border border-white/20 text-white/90 text-[11px] font-semibold backdrop-blur-sm pointer-events-none">
+              Preview · {Math.round(previewFitScale * 100)}% fit
+            </div>
           )}
 
           {/* FIXED HEIGHT CANVAS TOOLBAR */}
@@ -2775,9 +2849,9 @@ export default function CertificateGenerator() {
                     <Grid size={14} />
                   </button>
                   <button
-                    onClick={() => setIsPreviewMode(true)}
+                    onClick={enterPreviewMode}
                     className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 rounded transition"
-                    title="Full-screen preview"
+                    title="Full-screen preview (fit to screen)"
                   >
                     <Maximize2 size={14} />
                   </button>
@@ -2979,6 +3053,60 @@ export default function CertificateGenerator() {
                   </>
                 ) : null}
 
+                {selectedIds.length === 1 && primarySelectedElement && primarySelectedElement.type === 'line' ? (
+                  <>
+                    <input
+                      type="color"
+                      value={primarySelectedElement.color || '#1f2937'}
+                      onChange={(e) => updateSelectedElement('color', e.target.value)}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      className="w-8 h-8 rounded-full border border-purple-200 p-0 cursor-pointer shrink-0"
+                      title="Border color"
+                    />
+                    <div className="flex items-center gap-1 border border-purple-200 rounded-xl px-2 py-1 bg-white shadow-sm shrink-0">
+                      <span className="text-[10px] text-zinc-500 font-semibold uppercase">Width</span>
+                      <input
+                        type="number"
+                        value={primarySelectedElement.height || 2}
+                        min={1}
+                        max={24}
+                        onChange={(e) => updateSelectedElement('height', Number(e.target.value))}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        className="w-10 bg-transparent text-xs text-zinc-900 font-semibold focus:outline-none"
+                        title="Border thickness in pixels"
+                      />
+                      <span className="text-xs text-zinc-500">px</span>
+                    </div>
+                    <select
+                      value={primarySelectedElement.lineStyle || 'solid'}
+                      onChange={(e) => updateSelectedElement('lineStyle', e.target.value)}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      className="bg-white text-xs border border-purple-200 rounded-xl px-2 py-1 text-zinc-800 font-medium shadow-sm focus:outline-none focus:border-purple-600 shrink-0"
+                      title="Border style"
+                    >
+                      {LINE_STYLE_OPTIONS.map(option => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                    <div className="flex items-center gap-1 border border-purple-200 rounded-xl px-2 py-1 bg-white shadow-sm shrink-0">
+                      <span className="text-[10px] text-zinc-500 font-semibold uppercase">Length</span>
+                      <input
+                        type="number"
+                        value={primarySelectedElement.width || 180}
+                        min={30}
+                        max={1200}
+                        onChange={(e) => updateSelectedElement('width', Number(e.target.value))}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        className="w-14 bg-transparent text-xs text-zinc-900 font-semibold focus:outline-none"
+                        title="Border length in pixels"
+                      />
+                      <span className="text-xs text-zinc-500">px</span>
+                    </div>
+                  </>
+                ) : null}
+
                 {selectedIds.length === 1 && primarySelectedElement && primarySelectedElement.type === 'qrcode' ? (
                   <>
                     <div className="flex items-center gap-1.5 border border-purple-200 rounded-xl px-2 py-1 bg-white shadow-sm shrink-0 min-w-[200px] max-w-[min(420px,70vw)]">
@@ -3041,9 +3169,11 @@ export default function CertificateGenerator() {
 
           <div 
             ref={containerRef}
-            className={`flex-1 flex items-center justify-center p-12 overflow-auto relative select-none [scrollbar-gutter:stable] ${isPreviewMode ? 'bg-zinc-950' : 'bg-purple-50/20'}`}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
+            className={`flex-1 flex items-center justify-center overflow-auto relative select-none [scrollbar-gutter:stable] ${
+              isPreviewMode ? 'bg-zinc-950 p-4' : 'bg-purple-50/20 p-6'
+            }`}
+            onPointerMove={isPreviewMode ? undefined : handlePointerMove}
+            onPointerUp={isPreviewMode ? undefined : handlePointerUp}
           >
             <div 
               className="relative flex-shrink-0"
@@ -3233,13 +3363,7 @@ export default function CertificateGenerator() {
                           />
                         )
                       ) : el.type === 'line' ? (
-                        <div 
-                          style={{
-                            width: '100%',
-                            height: `${el.height || 2}px`,
-                            backgroundColor: el.color || '#1f2937'
-                          }}
-                        />
+                        <div style={getLineElementStyle(el)} />
                       ) : el.type === 'logo' && logoImg ? (
                         <img 
                           src={logoImg} 
