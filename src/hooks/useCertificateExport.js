@@ -15,6 +15,7 @@ export function useCertificateExport({
   currentAwardeeIdx,
   setCurrentAwardeeIdx,
   setSelectedIds,
+  setEditingElementId,
 }) {
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
@@ -39,6 +40,7 @@ export function useCertificateExport({
     cancelExportRef.current = false;
     setIsExporting(true);
     setSelectedIds([]);
+    setEditingElementId?.(null);
     setExportProgress(0);
     setExportStatusLabel('Preparing export…');
     const initialIdx = currentAwardeeIdx;
@@ -65,7 +67,7 @@ export function useCertificateExport({
       setExportStatusLabel('');
       cancelExportRef.current = false;
     }
-  }, [canvasRef, canvasSize, exportScale, awardees, projectName, setCurrentAwardeeIdx, setSelectedIds, currentAwardeeIdx, isCancelled]);
+  }, [canvasRef, canvasSize, exportScale, awardees, projectName, setCurrentAwardeeIdx, setSelectedIds, setEditingElementId, currentAwardeeIdx, isCancelled]);
 
   const exportAllToSinglePDF = useCallback(async ({
     exportMode = 'all',
@@ -84,6 +86,7 @@ export function useCertificateExport({
     cancelExportRef.current = false;
     setIsExporting(true);
     setSelectedIds([]);
+    setEditingElementId?.(null);
     setExportProgress(0);
     setExportStatusLabel('Building multi-page PDF…');
 
@@ -106,12 +109,13 @@ export function useCertificateExport({
       setExportStatusLabel('');
       cancelExportRef.current = false;
     }
-  }, [canvasRef, canvasSize, exportScale, awardees, currentAwardeeIdx, setCurrentAwardeeIdx, setSelectedIds, isCancelled]);
+  }, [canvasRef, canvasSize, exportScale, awardees, currentAwardeeIdx, setCurrentAwardeeIdx, setSelectedIds, setEditingElementId, isCancelled]);
 
   const exportTestPdf = useCallback(async () => {
     if (!canvasRef.current) return;
     setIsExporting(true);
     setSelectedIds([]);
+    setEditingElementId?.(null);
     setExportStatusLabel('Rendering preview PDF…');
     try {
       await exportTestCertificate({
@@ -125,7 +129,7 @@ export function useCertificateExport({
       setIsExporting(false);
       setExportStatusLabel('');
     }
-  }, [canvasRef, canvasSize, exportScale, currentAwardeeIdx, setCurrentAwardeeIdx, setSelectedIds]);
+  }, [canvasRef, canvasSize, exportScale, currentAwardeeIdx, setCurrentAwardeeIdx, setSelectedIds, setEditingElementId]);
 
   return {
     isExporting,

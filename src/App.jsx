@@ -8,7 +8,7 @@ import {
   Layers, Eye, EyeOff, ArrowUp, ArrowDown, Check, X, Search, Maximize2, Minimize2, Grid,
   Maximize, Info, Tag, FileType, QrCode, HelpCircle, Sparkles, ArrowRight, Coffee, Copy, Lock, Unlock, AlertTriangle,
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, Paintbrush, ClipboardPaste, Table2, Stamp,
-  PanelLeftClose, PanelLeftOpen,
+  PanelLeftClose, PanelLeftOpen, LayoutGrid,
 } from 'lucide-react';
 import LandingPage from './components/LandingPage';
 import LoaderOverlay from './components/LoaderOverlay';
@@ -25,6 +25,7 @@ import QRCodeElement from './components/QRCodeElement';
 import OnboardingWizard from './components/OnboardingWizard';
 import DocsModal from './components/DocsModal';
 import AwardeeBulkEditModal from './components/AwardeeBulkEditModal';
+import CertificateGridView from './components/CertificateGridView';
 import { GOOGLE_FONTS, CANVAS_PRESETS, PRESET_BACKGROUNDS } from './constants/index.js';
 import { SAMPLE_PROJECT } from './constants/sampleProject.js';
 import { deduplicateElements, getTextElementTransform } from './lib/elements.js';
@@ -46,6 +47,7 @@ import { getProjectAppliers, buildProjectSnapshot } from './lib/projectState.js'
 import { useAutoSave, useAutosaveRestore } from './hooks/useAutoSave.js';
 import { useCertificateExport } from './hooks/useCertificateExport.js';
 import { isOnboardingComplete, markOnboardingComplete } from './lib/onboarding.js';
+import { isPdfFile } from './lib/pdf/pdfFileUtils.js';
 
 export default function CertificateGenerator() {
   // Navigation state for Landing Page vs Editor
@@ -157,6 +159,7 @@ export default function CertificateGenerator() {
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [isKeyboardModalOpen, setIsKeyboardModalOpen] = useState(false);
   const [isPreviewMode, setIsPreviewMode] = useState(false);
+  const [isGridView, setIsGridView] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [previewFitScale, setPreviewFitScale] = useState(1);
   const [showGuides, setShowGuides] = useState(false);
@@ -167,6 +170,7 @@ export default function CertificateGenerator() {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportMode, setExportMode] = useState('all'); 
   const [exportFormat, setExportFormat] = useState('pdf'); // 'pdf' | 'png'
+  const [exportDelivery, setExportDelivery] = useState('zip'); // 'zip' | 'single-pdf'
   const [exportScale, setExportScale] = useState(2); // 1x draft, 2x HD, 3x Ultra HD
   const [selectedExportIndices, setSelectedExportIndices] = useState([]);
   const [parsedCsvDraft, setParsedCsvDraft] = useState(null);
@@ -175,6 +179,7 @@ export default function CertificateGenerator() {
   const [showOnboardingWizard, setShowOnboardingWizard] = useState(false);
   const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
+  const [isBackgroundUploading, setIsBackgroundUploading] = useState(false);
   const [copiedTextStyle, setCopiedTextStyle] = useState(null);
   const [launchWithSample, setLaunchWithSample] = useState(false);
   const [postLaunchAction, setPostLaunchAction] = useState(null);
@@ -238,27 +243,37 @@ export default function CertificateGenerator() {
   };
 
   const updateElementByKeyOrSig = (criteria, textVal, defaultProps) => {
-    let updatedEls = [...activeElements].filter(el => {
+    const matchesCriteria = (el) => {
       if (criteria.sigId && criteria.sigField) {
-        return !(el.sigId === criteria.sigId && el.sigField === criteria.sigField);
+        return el.sigId === criteria.sigId && el.sigField === criteria.sigField;
       }
-      if (criteria.key) {
-        return el.key !== criteria.key;
-      }
-      return true;
-    });
+      if (criteria.key) return el.key === criteria.key;
+      return false;
+    };
 
-    if (textVal && textVal.trim() !== '') {
-      updatedEls.push({
-        id: `field_${criteria.sigId ? `${criteria.sigId}_${criteria.sigField}` : criteria.key}_${Date.now()}`,
-        type: 'text',
-        ...criteria,
-        text: textVal,
-        ...defaultProps,
-        italic: false,
-        underline: false,
-        visible: true
-      });
+    const existing = activeElements.find(matchesCriteria);
+    let updatedEls;
+
+    if (!textVal || textVal.trim() === '') {
+      updatedEls = activeElements.filter(el => !matchesCriteria(el));
+    } else if (existing) {
+      updatedEls = activeElements.map(el =>
+        matchesCriteria(el) ? { ...existing, visible: true } : el
+      );
+    } else {
+      updatedEls = [
+        ...activeElements,
+        {
+          id: `field_${criteria.sigId ? `${criteria.sigId}_${criteria.sigField}` : criteria.key}_${Date.now()}`,
+          type: 'text',
+          ...criteria,
+          text: textVal,
+          ...defaultProps,
+          italic: defaultProps.italic ?? false,
+          underline: defaultProps.underline ?? false,
+          visible: true,
+        },
+      ];
     }
 
     if (currentAwardee.hasCustomLayout) {
@@ -283,14 +298,17 @@ export default function CertificateGenerator() {
     updateElementByKeyOrSig({ key }, val, defaults);
   };
 
-  const handleAwardeeChange = (field, val) => {
+  const handleAwardeeChange = (awardeeIdx, field, val) => {
     setAwardees(prev => prev.map((a, i) => {
-      if (i === currentAwardeeIdx) {
+      if (i === awardeeIdx) {
         const updatedCsvData = { ...(a.csvData || {}), [field === 'name' ? 'Name' : 'Position']: val };
         return { ...a, [field]: val, csvData: updatedCsvData };
       }
       return a;
     }));
+
+    if (awardeeIdx !== currentAwardeeIdx) return;
+
     const key = field === 'name' ? 'awardeeName' : 'awardeePosition';
     const defaults = field === 'name' 
       ? { x: 50, y: 36, fontSize: 36, font: 'Great Vibes', color: '#581c87', bold: true, maxWidth: 90, align: 'center' }
@@ -536,10 +554,12 @@ export default function CertificateGenerator() {
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [marquee, setMarquee] = useState(null); 
-  const dragStartRef = useRef({ clickX: 0, clickY: 0, initialPositions: {} });
+  const dragStartRef = useRef({ clickX: 0, clickY: 0, initialPositions: {}, startClientX: 0, startClientY: 0 });
   const resizeStartRef = useRef({ startX: 0, startWidth: 50, startElementWidth: 180 });
   const pendingEditRef = useRef(null);
   const editingNodeRef = useRef(null);
+  const dragPendingRef = useRef(false);
+  const DRAG_THRESHOLD_PX = 4;
 
   useEffect(() => {
     if (!editingElementId) return;
@@ -594,6 +614,7 @@ export default function CertificateGenerator() {
     currentAwardeeIdx,
     setCurrentAwardeeIdx,
     setSelectedIds,
+    setEditingElementId,
   });
 
   const exportSummary = useMemo(() => getExportSummary({
@@ -652,9 +673,25 @@ export default function CertificateGenerator() {
     return () => media.removeEventListener('change', handleChange);
   }, []);
 
+  useEffect(() => {
+    setSidebarPage(Math.floor(currentAwardeeIdx / itemsPerPage));
+  }, [currentAwardeeIdx, itemsPerPage]);
+
+  useEffect(() => {
+    if (activeTab !== 'data' || isPreviewMode) return undefined;
+
+    const frame = requestAnimationFrame(() => {
+      const selectedNode = document.getElementById(`awardee-sidebar-item-${currentAwardeeIdx}`);
+      selectedNode?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [currentAwardeeIdx, sidebarPage, activeTab, isPreviewMode]);
+
   const enterPreviewMode = () => {
     setSelectedIds([]);
     setEditingElementId(null);
+    setIsGridView(false);
     setIsPreviewMode(true);
   };
 
@@ -1536,6 +1573,45 @@ export default function CertificateGenerator() {
     pushHistory(updated);
   };
 
+  const TEXT_FIELD_PLACEHOLDERS = {
+    awardeeName: 'Awardee Name',
+    awardeePosition: 'Position / Title',
+    orgName: 'Organization Name',
+    orgSubtext: 'Organization Subtext',
+    certificateTitle: 'Certificate Title',
+    dateLine: 'Date Line',
+  };
+
+  const beginInlineTextEdit = (el, clientX, clientY, displayNode) => {
+    if (isPreviewMode || el.locked) return;
+
+    const node = displayNode || null;
+    const displayText = node?.textContent || '';
+    const editText = getEditableText(el);
+    let caretOffset = node ? getCaretOffsetFromPoint(node, clientX, clientY) : null;
+
+    if (
+      caretOffset != null &&
+      displayText.length > 0 &&
+      editText.length > 0 &&
+      displayText !== editText
+    ) {
+      caretOffset = Math.min(
+        editText.length,
+        Math.round((caretOffset / displayText.length) * editText.length)
+      );
+    }
+
+    pendingEditRef.current = {
+      elementId: el.id,
+      text: editText,
+      caretOffset,
+      selectWord: true,
+    };
+    dragPendingRef.current = false;
+    setEditingElementId(el.id);
+  };
+
   const handleCanvasPointerDown = (e) => {
     if (!canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
@@ -1544,6 +1620,8 @@ export default function CertificateGenerator() {
 
     setMarquee({ startX: x, startY: y, currentX: x, currentY: y });
     if (!e.shiftKey) setSelectedIds([]);
+    dragPendingRef.current = false;
+    e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   const handleElementPointerDown = (e, id) => {
@@ -1564,7 +1642,12 @@ export default function CertificateGenerator() {
 
     if (targetEl?.locked) return;
 
-    setIsDragging(true);
+    if (targetEl?.type === 'text' && e.detail >= 2) {
+      beginInlineTextEdit(targetEl, e.clientX, e.clientY, e.currentTarget.querySelector('[data-text-display]'));
+      return;
+    }
+
+    dragPendingRef.current = true;
 
     if (canvasRef.current) {
       const rect = canvasRef.current.getBoundingClientRect();
@@ -1578,8 +1661,16 @@ export default function CertificateGenerator() {
         }
       });
 
-      dragStartRef.current = { clickX, clickY, initialPositions: initialPosMap };
+      dragStartRef.current = {
+        clickX,
+        clickY,
+        initialPositions: initialPosMap,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+      };
     }
+
+    e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   const handlePointerMove = (e) => {
@@ -1612,6 +1703,17 @@ export default function CertificateGenerator() {
     if (marquee) {
       setMarquee({ ...marquee, currentX: currX, currentY: currY });
       return;
+    }
+
+    if (dragPendingRef.current && !isDragging && selectedIds.length > 0) {
+      const dx = e.clientX - dragStartRef.current.startClientX;
+      const dy = e.clientY - dragStartRef.current.startClientY;
+      if (Math.hypot(dx, dy) >= DRAG_THRESHOLD_PX) {
+        dragPendingRef.current = false;
+        setIsDragging(true);
+      } else {
+        return;
+      }
     }
 
     if (isResizing && selectedIds.length === 1) {
@@ -1731,15 +1833,41 @@ export default function CertificateGenerator() {
       pushHistory(activeElementsRef.current);
     }
 
+    dragPendingRef.current = false;
     setIsDragging(false);
     setIsResizing(false);
     setMarquee(null);
     setSnapStatus({ x: false, y: false });
   };
 
-  const handleFileUpload = (e, type) => {
+  const clearCanvasSelection = () => {
+    setSelectedIds([]);
+    setEditingElementId(null);
+    dragPendingRef.current = false;
+    setIsDragging(false);
+    setIsResizing(false);
+    setMarquee(null);
+  };
+
+  const handleFileUpload = async (e, type) => {
     const file = e.target.files[0];
     if (!file) return;
+    e.target.value = '';
+
+    if (type === 'background' && isPdfFile(file)) {
+      setIsBackgroundUploading(true);
+      try {
+        const { renderPdfFirstPageToDataUrl } = await import('./lib/pdf/renderPdfBackground.js');
+        const dataUrl = await renderPdfFirstPageToDataUrl(file, { canvasSize });
+        setCustomBg(dataUrl);
+        setBgType('custom');
+      } catch {
+        alert('Could not load that PDF background. Try another PDF or use PNG/JPG/WebP instead.');
+      } finally {
+        setIsBackgroundUploading(false);
+      }
+      return;
+    }
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -1850,9 +1978,11 @@ export default function CertificateGenerator() {
     setParsedCsvDraft(null);
   };
 
-  const openExportModal = () => {
+  const openExportModal = (delivery = 'zip') => {
+    clearCanvasSelection();
     setSelectedExportIndices(awardees.map((_, idx) => idx));
     setExportMode('all');
+    setExportDelivery(delivery);
     setIsExportModalOpen(true);
   };
 
@@ -1879,6 +2009,21 @@ export default function CertificateGenerator() {
   const jumpToAwardee = (idx) => {
     setCurrentAwardeeIdx(idx);
     setSidebarPage(Math.floor(idx / itemsPerPage));
+  };
+
+  const enterGridView = () => {
+    clearCanvasSelection();
+    setIsPreviewMode(false);
+    setIsGridView(true);
+  };
+
+  const exitGridView = () => {
+    setIsGridView(false);
+  };
+
+  const editAwardeeFromGrid = (idx) => {
+    jumpToAwardee(idx);
+    setIsGridView(false);
   };
 
   const sidebarSearchMatches = awardees
@@ -1963,6 +2108,8 @@ export default function CertificateGenerator() {
         setExportScale={setExportScale}
         exportMode={exportMode}
         setExportMode={setExportMode}
+        exportDelivery={exportDelivery}
+        setExportDelivery={setExportDelivery}
         selectedExportIndices={selectedExportIndices}
         setSelectedExportIndices={setSelectedExportIndices}
         awardees={awardees}
@@ -2300,7 +2447,8 @@ export default function CertificateGenerator() {
                         const isDimmed = sidebarSearchQuery.trim() && !isSearchMatch;
                         return (
                           <div 
-                            key={item.id} 
+                            key={item.id}
+                            id={`awardee-sidebar-item-${idx}`}
                             onClick={() => jumpToAwardee(idx)}
                             className={`p-3 rounded-xl border flex flex-col gap-2 cursor-pointer transition shadow-sm ${
                               currentAwardeeIdx === idx
@@ -2332,7 +2480,8 @@ export default function CertificateGenerator() {
                               <input 
                                 type="text" 
                                 value={item.name} 
-                                onChange={(e) => handleAwardeeChange('name', e.target.value)}
+                                onChange={(e) => handleAwardeeChange(idx, 'name', e.target.value)}
+                                onFocus={() => jumpToAwardee(idx)}
                                 onBlur={() => commitHistorySnapshot()}
                                 onClick={(e) => e.stopPropagation()}
                                 placeholder="Awardee Name"
@@ -2345,8 +2494,10 @@ export default function CertificateGenerator() {
                               <input 
                                 type="text" 
                                 value={item.position} 
-                                onChange={(e) => handleAwardeeChange('position', e.target.value)}
+                                onChange={(e) => handleAwardeeChange(idx, 'position', e.target.value)}
+                                onFocus={() => jumpToAwardee(idx)}
                                 onBlur={() => commitHistorySnapshot()}
+                                onClick={(e) => e.stopPropagation()}
                                 placeholder="Position / Designation"
                                 className="w-full bg-white border border-purple-200 rounded px-2 py-1 text-xs text-purple-950 font-semibold focus:outline-none focus:border-purple-600 uppercase shadow-sm"
                               />
@@ -2406,7 +2557,23 @@ export default function CertificateGenerator() {
                     )}
 
                     <button 
-                      onClick={() => setAwardees([...awardees, { id: String(Date.now()), name: '', position: '', csvData: { Name: '', Position: '' }, hasCustomLayout: false, customElements: null, customSignatories: null }])} 
+                      onClick={() => {
+                        const newIdx = awardees.length;
+                        setAwardees([
+                          ...awardees,
+                          {
+                            id: String(Date.now()),
+                            name: '',
+                            position: '',
+                            csvData: { Name: '', Position: '' },
+                            hasCustomLayout: false,
+                            customElements: null,
+                            customSignatories: null,
+                          },
+                        ]);
+                        setCurrentAwardeeIdx(newIdx);
+                        setSidebarPage(Math.floor(newIdx / itemsPerPage));
+                      }}
                       className="w-full py-2 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg text-xs font-bold text-purple-900 flex items-center justify-center gap-1 transition shadow-sm"
                     >
                       <Plus size={14} /> Add Awardee
@@ -2569,10 +2736,19 @@ export default function CertificateGenerator() {
                       ))}
                     </div>
 
-                    <label className="block w-full border-2 border-dashed border-purple-200 hover:border-purple-500 rounded-xl p-3 text-center cursor-pointer transition mb-3 bg-white shadow-sm">
+                    <label className={`block w-full border-2 border-dashed rounded-xl p-3 text-center transition mb-3 bg-white shadow-sm ${isBackgroundUploading ? 'border-purple-300 cursor-wait opacity-80' : 'border-purple-200 hover:border-purple-500 cursor-pointer'}`}>
                       <Upload size={18} className="mx-auto mb-1 text-purple-600" />
-                      <span className="text-xs text-zinc-700 font-medium block">Upload Custom Background</span>
-                      <input type="file" accept="image/*" onChange={e => handleFileUpload(e, 'background')} className="hidden" />
+                      <span className="text-xs text-zinc-700 font-medium block">
+                        {isBackgroundUploading ? 'Converting PDF background…' : 'Upload Custom Background'}
+                      </span>
+                      <span className="text-[10px] text-zinc-500 block mt-0.5">PNG, JPG, WebP, or PDF (first page)</span>
+                      <input
+                        type="file"
+                        accept="image/*,.pdf,application/pdf"
+                        onChange={e => handleFileUpload(e, 'background')}
+                        disabled={isBackgroundUploading}
+                        className="hidden"
+                      />
                     </label>
 
                     {bgType === 'custom' && (
@@ -2690,7 +2866,7 @@ export default function CertificateGenerator() {
 
             <div className={`p-4 border-t border-purple-100 bg-purple-50/40 space-y-2 shrink-0 min-w-[24rem] ${isSidebarCollapsed ? 'invisible' : ''}`}>
               <button 
-                onClick={openExportModal}
+                onClick={() => openExportModal('zip')}
                 disabled={isExporting}
                 className="w-full py-3 bg-gradient-to-r from-purple-600 to-purple-800 hover:from-purple-700 hover:to-purple-900 font-bold text-white rounded-xl shadow-md flex items-center justify-center gap-2 transition disabled:opacity-50"
               >
@@ -2698,12 +2874,12 @@ export default function CertificateGenerator() {
                 {isExporting ? `Exporting (${exportProgress}%)...` : `Export Certificates (ZIP)`}
               </button>
               <button 
-                onClick={exportAllToSinglePDF}
+                onClick={() => openExportModal('single-pdf')}
                 disabled={isExporting || awardees.length === 0}
                 className="w-full py-2.5 bg-white border border-purple-300 hover:bg-purple-50 font-bold text-purple-900 rounded-xl shadow-sm flex items-center justify-center gap-2 transition disabled:opacity-50 text-sm"
               >
                 <FileText size={16} />
-                Export All as Single PDF
+                Export Single PDF…
               </button>
             </div>
             <div className={`p-4 border-t border-gray-200 bg-gray-50 shrink-0 min-w-[24rem] ${isSidebarCollapsed ? 'invisible' : ''}`}>
@@ -2752,14 +2928,14 @@ export default function CertificateGenerator() {
           )}
 
           {/* FIXED HEIGHT CANVAS TOOLBAR */}
-          {!isPreviewMode && (
+          {!isPreviewMode && !isGridView && (
             <div className="h-14 shrink-0 border-b border-purple-200 bg-white/95 backdrop-blur px-3 flex items-center justify-between gap-2 z-20 shadow-sm overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
 
               {/* Left: Awardee nav + canvas tools */}
               <div className="flex items-center gap-2 shrink-0">
                 <div className="flex items-center gap-0.5 bg-purple-50/80 border border-purple-200 rounded-lg px-1 py-1 shadow-sm">
                   <button
-                    onClick={() => setCurrentAwardeeIdx(prev => Math.max(0, prev - 1))}
+                    onClick={() => jumpToAwardee(Math.max(0, currentAwardeeIdx - 1))}
                     disabled={currentAwardeeIdx === 0}
                     className="p-1.5 hover:bg-purple-100 rounded text-zinc-700 disabled:opacity-30 transition"
                     title="Previous awardee"
@@ -2789,7 +2965,7 @@ export default function CertificateGenerator() {
                   </div>
 
                   <button
-                    onClick={() => setCurrentAwardeeIdx(prev => Math.min(awardees.length - 1, prev + 1))}
+                    onClick={() => jumpToAwardee(Math.min(awardees.length - 1, currentAwardeeIdx + 1))}
                     disabled={currentAwardeeIdx === awardees.length - 1}
                     className="p-1.5 hover:bg-purple-100 rounded text-zinc-700 disabled:opacity-30 transition"
                     title="Next awardee"
@@ -2847,6 +3023,13 @@ export default function CertificateGenerator() {
                     title="Toggle ruler guides"
                   >
                     <Grid size={14} />
+                  </button>
+                  <button
+                    onClick={enterGridView}
+                    className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-50 rounded transition"
+                    title="Grid view — browse all certificates"
+                  >
+                    <LayoutGrid size={14} />
                   </button>
                   <button
                     onClick={enterPreviewMode}
@@ -2911,9 +3094,13 @@ export default function CertificateGenerator() {
             </div>
           )}
 
-          {selectedIds.length > 0 && !isPreviewMode && (
+          {selectedIds.length > 0 && !isPreviewMode && !isGridView && !isExporting && !isExportModalOpen && (
             <div className="absolute top-14 inset-x-0 z-50 flex justify-center px-4 pt-3 pointer-events-none">
-              <div className="pointer-events-auto max-w-full overflow-x-auto bg-white/95 backdrop-blur-md border border-purple-200 rounded-2xl shadow-2xl px-3 py-1.5 flex items-center gap-2 flex-wrap justify-center [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div
+                className="pointer-events-auto max-w-full overflow-x-auto bg-white/95 backdrop-blur-md border border-purple-200 rounded-2xl shadow-2xl px-3 py-1.5 flex items-center gap-2 flex-wrap justify-center [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                onPointerDown={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
                 <div className="flex items-center gap-1 border border-transparent rounded-full bg-purple-50/80 px-1 py-1 shrink-0">
                   <button onClick={() => handleAlign('left')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-100 rounded-full transition" title="Align element left"><AlignLeft size={14} /></button>
                   <button onClick={() => handleAlign('center')} className="p-1.5 text-zinc-700 hover:text-purple-700 hover:bg-purple-100 rounded-full transition" title="Align element center"><AlignCenter size={14} /></button>
@@ -2964,6 +3151,7 @@ export default function CertificateGenerator() {
                     <select 
                       value={primarySelectedElement.font} 
                       onChange={e => updateSelectedElement('font', e.target.value)}
+                      onPointerDown={(e) => e.stopPropagation()}
                       className="bg-white text-xs border border-purple-200 rounded-xl px-2 py-1 text-zinc-800 font-medium shadow-sm focus:outline-none focus:border-purple-600 shrink-0 max-w-[140px]"
                     >
                       <optgroup label="Serif / Academic">
@@ -3000,6 +3188,8 @@ export default function CertificateGenerator() {
                         type="number" 
                         value={primarySelectedElement.fontSize} 
                         onChange={e => updateSelectedElement('fontSize', Number(e.target.value))}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
                         className="w-14 bg-transparent text-xs text-zinc-900 font-semibold focus:outline-none"
                         title="Font size"
                       />
@@ -3010,6 +3200,7 @@ export default function CertificateGenerator() {
                       type="color" 
                       value={primarySelectedElement.color || '#1f2937'} 
                       onChange={e => updateSelectedElement('color', e.target.value)}
+                      onPointerDown={(e) => e.stopPropagation()}
                       className="w-8 h-8 rounded-full border border-purple-200 p-0 cursor-pointer shrink-0"
                       title="Text color"
                     />
@@ -3167,13 +3358,29 @@ export default function CertificateGenerator() {
             </div>
           )}
 
+          {isGridView ? (
+            <CertificateGridView
+              awardees={awardees}
+              currentAwardeeIdx={currentAwardeeIdx}
+              canvasSize={canvasSize}
+              bgType={bgType}
+              customBg={customBg}
+              bgTransform={bgTransform}
+              logoImg={logoImg}
+              globalData={globalData}
+              elements={elements}
+              signatories={signatories}
+              onSelectAwardee={jumpToAwardee}
+              onEditAwardee={editAwardeeFromGrid}
+              onExitGrid={exitGridView}
+            />
+          ) : (
           <div 
             ref={containerRef}
             className={`flex-1 flex items-center justify-center overflow-auto relative select-none [scrollbar-gutter:stable] ${
               isPreviewMode ? 'bg-zinc-950 p-4' : 'bg-purple-50/20 p-6'
             }`}
             onPointerMove={isPreviewMode ? undefined : handlePointerMove}
-            onPointerUp={isPreviewMode ? undefined : handlePointerUp}
           >
             <div 
               className="relative flex-shrink-0"
@@ -3225,6 +3432,7 @@ export default function CertificateGenerator() {
                 <div 
                   ref={canvasRef}
                   onPointerDown={handleCanvasPointerDown}
+                  onPointerUp={isPreviewMode ? undefined : handlePointerUp}
                   className="relative w-full h-full shadow-2xl overflow-hidden cursor-crosshair rounded-sm"
                   style={{
                     ...(bgType !== 'custom' ? PRESET_BACKGROUNDS[bgType].style : { backgroundColor: '#ffffff' })
@@ -3275,17 +3483,32 @@ export default function CertificateGenerator() {
                   if (el.visible === false) return null;
                   const isSelected = !isPreviewMode && selectedIds.includes(el.id);
                   const isEditing = !isPreviewMode && editingElementId === el.id;
+                  const displayHtml = el.type === 'text' ? getElementText(el) : '';
+                  const isTextEmpty = el.type === 'text' && !stripHtml(displayHtml).trim();
+                  const textPlaceholder = TEXT_FIELD_PLACEHOLDERS[el.key] || el.label || 'Double-click to edit';
 
                   return (
                     <div
                       key={el.id}
                       onPointerDown={(e) => { if (!isPreviewMode) handleElementPointerDown(e, el.id); }}
-                      className={`absolute ${!isPreviewMode ? (el.locked ? 'cursor-not-allowed' : 'cursor-move') : ''} ${isSelected ? 'ring-2 ring-purple-600 bg-purple-600/5' : (!isPreviewMode ? 'hover:ring-1 hover:ring-purple-400/50' : '')} ${el.locked ? 'opacity-95' : ''}`}
+                      onPointerUp={isPreviewMode ? undefined : (e) => { handlePointerUp(); e.stopPropagation(); }}
+                      onDoubleClick={(e) => {
+                        if (isPreviewMode || el.type !== 'text' || el.locked) return;
+                        e.stopPropagation();
+                        beginInlineTextEdit(
+                          el,
+                          e.clientX,
+                          e.clientY,
+                          e.currentTarget.querySelector('[data-text-display]')
+                        );
+                      }}
+                      className={`absolute ${!isPreviewMode ? (el.locked ? 'cursor-not-allowed' : el.type === 'text' ? 'cursor-text' : 'cursor-move') : ''} ${isSelected ? 'ring-2 ring-purple-600 bg-purple-600/5' : (!isPreviewMode ? 'hover:ring-1 hover:ring-purple-400/50' : '')} ${el.locked ? 'opacity-95' : ''}`}
                       style={{
                         left: `${el.x}%`,
                         top: `${el.y}%`,
                         transform: getTextElementTransform(el),
                         width: el.type === 'text' ? `${el.maxWidth || 80}%` : (el.type === 'line' || el.type === 'logo' || el.type === 'image') ? `${el.width || 100}px` : el.type === 'qrcode' ? `${el.size || 90}px` : 'auto',
+                        minHeight: el.type === 'text' ? `${Math.ceil((el.fontSize || 20) * 1.35)}px` : undefined,
                         zIndex: isSelected ? 30 : 10
                       }}
                     >
@@ -3320,47 +3543,30 @@ export default function CertificateGenerator() {
                           />
                         ) : (
                           <div 
-                            onDoubleClick={(e) => {
-                              if (isPreviewMode) return;
-                              e.stopPropagation();
-                              const displayNode = e.currentTarget;
-                              const displayText = displayNode.textContent || '';
-                              const editText = getEditableText(el);
-                              let caretOffset = getCaretOffsetFromPoint(displayNode, e.clientX, e.clientY);
-                              if (
-                                caretOffset != null &&
-                                displayText.length > 0 &&
-                                editText.length > 0 &&
-                                displayText !== editText
-                              ) {
-                                caretOffset = Math.min(
-                                  editText.length,
-                                  Math.round((caretOffset / displayText.length) * editText.length)
-                                );
-                              }
-                              pendingEditRef.current = {
-                                elementId: el.id,
-                                text: editText,
-                                caretOffset,
-                                selectWord: true,
-                              };
-                              setEditingElementId(el.id);
-                            }}
+                            data-text-display
                             style={{
                               fontFamily: getFontFamily(el.font),
                               fontSize: `${el.fontSize}px`,
-                              color: el.color,
+                              color: isTextEmpty ? '#a1a1aa' : el.color,
                               textAlign: el.align || 'left',
                               fontWeight: el.bold ? 'bold' : 'normal',
                               whiteSpace: 'pre-wrap',
                               lineHeight: 1.3,
                               display: 'block',
                               width: '100%',
-                              cursor: isPreviewMode ? 'default' : 'text'
+                              minHeight: `${Math.ceil((el.fontSize || 20) * 1.35)}px`,
+                              cursor: isPreviewMode ? 'default' : 'text',
+                              fontStyle: isTextEmpty ? 'italic' : 'normal',
                             }}
                             title={isPreviewMode ? '' : "Double-click to edit text & highlight specific letters/words"}
-                            dangerouslySetInnerHTML={{ __html: getElementText(el) }}
-                          />
+                            dangerouslySetInnerHTML={
+                              isTextEmpty
+                                ? undefined
+                                : { __html: displayHtml }
+                            }
+                          >
+                            {isTextEmpty ? textPlaceholder : null}
+                          </div>
                         )
                       ) : el.type === 'line' ? (
                         <div style={getLineElementStyle(el)} />
@@ -3456,6 +3662,7 @@ export default function CertificateGenerator() {
               </div>
             </div>
           </div>
+          )}
 
         </div>
 
